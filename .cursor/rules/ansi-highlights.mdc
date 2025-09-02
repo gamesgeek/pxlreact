@@ -1,0 +1,11 @@
+---
+description: Explain ansi.py and terminal highlighting
+globs:
+alwaysApply: true
+---
+
+- ansi.py provides global shorthand for ANSI colors to use within f-strings for basic output
+highlighting to improve readability; modules can import * from ansi
+- Apply some basic conventions: RED for errors, failures, YELLOW for warnings, GREEN for confirmation
+and success, MAGENTA for numeric data and variables, CYAN for filenames and I/O
+- Example: print( f'{RED}Error: bad configuration{RESET}' )

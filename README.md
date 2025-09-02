@@ -1,42 +1,27 @@
 # Project Overview
-PxlReact is a utility written in Python to help automate tasks that depend on basic keyboard and mouse input; it
-can be used to enhance productivity for high volume repetitive input asks, or to help automate tasks related to testing
-and validating features in other applications.
-
-PxlReact achieves this with three primary functional areas:
-
-  1. `Watch`: PxlReact can be configured to monitor one or more pixel locations using `get_pixel_color` or similar
-  2. `Report`: Using a simple GUI window, PxlReact provides the user realtime feedback on the status of watched pixels
-  3. `React`: For any pixel currently being monitored, PxlReact may register an event that will trigger based on changes
-  in the state of that pixel; generally this will mean calling a specific method in response to changes in color.
+PxlReact seeks to enhance and automate tasks in various applications including games by:
+- Monitoring the state of pixels on the screen, primarily observing for color fluctuations
+- Triggering predefined "reactions" when monitored pixels change; reactions will usually involve
+sending one or more key events via PxlIntercept, but may include other actions such as playing sounds
 
 # PxlReact Structure
-PxlReact is a relatively small Python project divided between a number of files that implement the classes responsible
-for its primary functions.
 
-## Class PxlIntercept
+## Hardware Interception, Keyboard Handling
+The classes PxlIntercept and PxlKbd are responsible for dispatching key events via pyinterception
+and, defining and managing keybinds (remappings), and capturing keys from the user's physical keyboard
+in order to enforce defined mappings.
+
 PxlIntercept is a wrapper-wrapper around pyinterception, which is itself a wrapper for the Interception library.
 
 - [pyinterception](https://github.com/kennyhml/pyinterception)
 - [Interception library](https://github.com/oblitum/Interception?tab=readme-ov-file#readme)
 
-This class exists primarily to interface with pyinterception in order to send simulated hardware events so that other
-applications perceive the output from PxlReact to have originated from a device. For added authenticity, PxlIntercept
-includes some very basic randomization of key delays when invoking the pyinterception calls.
-
-### Key Intercept Functions
-Presently, there are three primary functions implemented by the PxlIntercept class:
-
-  1. `press` a key immediately, releasing based on pyinterceptions own internal delay
-  2. `react` to a key by introducing a short human-like delay prior to the press event
-  3. `hold-and-release` a key by separating the `key_down()` and `key_up()` events
-
-Each of these functions make use of a dictionary of precomputed random values in order to introduce additional input
-variability.
+To avoid running afoul of various automation detection algorithms, PxlIntercept adds pseudo-random
+delays before key press events and between press and release events. 
 
 ## Class PxlReactApp
-The "main entry point" of the utility; an instance of PxlReactApp creates a GUI for displaying pixel information, and
-a PxlWatcher for collecting it.
+The "main entry point" of the utility; an instance of PxlReactApp creates a GUI for displaying pixel
+information, and a PxlWatcher for collecting it.
 
 ### The PxlReactApp GUI
 
@@ -117,30 +102,6 @@ was seen by the last poll cycle).
 
 One possible enhancement opportunity for PxlReact will be to add additional data to the set of pixel data, which may
 eventually suggest the need for a companion class that encapsulates a pixel object to manage this data more effectively.
-
-#### Potential Pixel Data Text (Future - Not Implemented)
-Here are some possible details that may eventually need to be associated with pixels:
-
-- `name`; a label or name for each pixel might help keep track of why they're being monitored (e.g., "exit button"). Rather
-  than being included within the data on the interior of a pixel display area, it might be ideal if these labels were displayed
-  as "titles" for each area, though that would add some complexity to the layout and update logic.
-
-- `delta`; at each poll, it will likely be necessary at some point to implement a method for calculating the degree of
-  change that took place since the most recent poll. This is likely to be achieved by implementing a method to calculate
-  the Euclidean distance between two colors, then using this whenever a pixel's color changes to measure the degree of
-  color difference. One very practical application for this feature would be the ability to set "thresholds" for reaction
-  events such that a certain pixel is allowed to fluctuate slightly within a predefined +/- range from its "baseline" color,
-  and reacion events are only triggered if its color delta exceeds that range. Put another way, it will be helpful to be able
-  to react to a pixel's color change only if it is "very different" from the color it was when assigned.
-
-- `reaction_event` to achieve the desired functionality of "reacting to changes in color," it will be
-  necessary eventually to assign each pixel a reaction event somehow, likely by specifying a method to be invoked when
-  the pixel color changes (or changes "a lot" assuming we have also implemented the color delta enhancement).
-
-- `logging`; Once pixel data logging is implemented (see below), it will be necessary to assign each pixel a boolean flag
-  to indicate whether we are currently logging data for that pixel. Logging should be toggleable for each pixel independently
-  using a modifier keybind; suggestion being that `alt-*` enable logging for the pixel associated with that key, e.g., if
-  F20 assigns the current pixel to "area 1" then ALT-F20 would enable logging for pixel 1.
 
 ## Class Pxl
 Pxl's represent a location on the screen, their most recently-observed color, and any PxlReactions associated with them.
@@ -253,27 +214,13 @@ various components of PxlReact.
 Following are absolute paths showing where the components of PxlReact reside on my local system.
 
 `C:/dev/pxlreact` is the primary working directory and home to all scripts
-`C:/dev/PxlReact/doc` holds some project documentation including non-functional script/code for use by ChatGPT as reference
 
 ## PxlReact Technology Stack
 
 - [Microsoft Windows 11](https://www.microsoft.com/en-us/windows/windows-11?r=1)
-- [Microsoft VSCode](https://code.visualstudio.com/)
-- [Python 3.12.8](https://www.python.org/downloads/release/python-3128/) installed globally
-- [Github](https://github.com/kerchunkwow/PxlReact) for source control
+- [Cursor](https://docs.cursor.com/)
+- [Python 3.12.10](https://www.python.org/downloads/release/python-3128/)
+- [Github](https://github.com/gamesgeek/pxlreact)
 - [tkinter](https://docs.python.org/3/library/tkinter.html) for the GUI/window
-- [ChatGPT](https://chatgpt.com/)
 - [pyinterception](https://github.com/kennyhml/pyinterception)
 - [Interception](https://github.com/oblitum/Interception?tab=readme-ov-file)
-
-## Reference Files for ChatGPT
-Some "external" files are included among the project files provided to ChatGPT in the hopes that they may provide
-more contextual information related to some of the projects components and lead to more consistent and accurate
-responses when discussing related functionality:
-
-`PxlReact Screenshot.png` recent screenshot showing PxlReact main GUI layout
-`pyinterception_README.md` main README for pyinterception
-`pyinterception.py` the primary/biggest file in the pyinterception library; should be a useful reference
-`pyinterception_inputs.py` additional functionality from the pyinterception library for reference
-`tkinter_constants.py` constants defined within the tkinter library (gui window provider)
-`tkinter_ttk.py` primary/largest file in the tkinter implementation

@@ -1,0 +1,8 @@
+---
+description: Provide context for use of tkinter
+globs:
+alwaysApply: true
+---
+
+- PxlReact utilizes tkinter for its simple GUI: https://docs.python.org/3/library/tkinter.html
+
