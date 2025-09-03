@@ -1,0 +1,8 @@
+---
+description: Activate virtual environment (.pxlenv)
+globs:
+alwaysApply: true
+---
+
+- PxlReact uses a Python virtual environment in ./.pxlenv
+- Activate: `.pxlenv\Scripts\Activate.ps1`

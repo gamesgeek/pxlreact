@@ -1,5 +1,5 @@
 ---
-description: Explain ansi.py and terminal highlighting
+description: ansi.py provides shorthands for Terminal highlighting
 globs:
 alwaysApply: true
 ---

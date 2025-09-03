@@ -22,9 +22,9 @@ LAST_WIN = ''
 # Position & RGB values for reference pixels at various screen locations for checking which state
 # the game is in.
 
-CHAT_BUBBLE_X = 23
-CHAT_BUBBLE_Y = 1076
-CHAT_BUBBLE_COLOR = ( 160, 160, 136)
+CHAT_BUBBLE_X = 19
+CHAT_BUBBLE_Y = 1081
+CHAT_BUBBLE_COLOR = ( 163, 156, 126 )
 
 # Define keybinds for PxlReact
 KEYBINDS = {
@@ -462,8 +462,8 @@ class PxlReactionRegistry:
     reaction_types = [ "react_if_color", "react_if_not_color" ]
 
     # The color of the pixels to look for to ensure we're "healthy and energetic"
-    hp_reaction_color = (156, 35, 41)
-    mp_reaction_color = (27, 75, 138)
+    hp_reaction_color = (167, 34, 46)
+    mp_reaction_color = (16, 53, 111)
 
     # How long our flasks take to recharge (don't try to use them more often than this)
     hp_cooldown = 4
@@ -482,16 +482,16 @@ class PxlReactionRegistry:
 
         self.reactions_registry = {
             'HP1': {
-                'sx': 167,
-                'sy': 1238,
+                'sx': 134,
+                'sy': 1275,
                 'type': 'react_if_not_color',
                 'reaction_color': self.hp_reaction_color,
                 'cooldown': self.hp_cooldown,
                 'reaction': self.react_HP
             },
             'MP1': {
-                'sx': 2397,
-                'sy': 1313,
+                'sx': 2400,
+                'sy': 1364,
                 'type': 'react_if_not_color',
                 'reaction_color': self.mp_reaction_color,
                 'cooldown': self.mp_cooldown,
@@ -596,3 +596,4 @@ class PxlReactionRegistry:
 if __name__ == "__main__":
     app = PxlReactApp()
     app.run()
+

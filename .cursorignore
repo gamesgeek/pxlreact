@@ -3,3 +3,5 @@
 .style.yapf
 doc/deprecated.py.txt
 media/
+*.dll
+*.lib

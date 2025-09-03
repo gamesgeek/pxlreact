@@ -4,23 +4,15 @@ from itertools import cycle
 
 from concurrent.futures import ThreadPoolExecutor
 
-"""
-pyinerception interacts with the interception driver.
+# Using local pyinterception files for better control and stability
+import pyinterception.src.interception as pyint
+from pyinterception.src.interception.constants import FilterKeyFlag, KeyFlag
 
-Local & online references:
-    - pyinterception_README.md
-    - pyinterception_inputs.py
-    - pyinterception.py
-    - https://github.com/kennyhml/pyinterception
-    - https://github.com/oblitum/Interception
-"""
-import interception as pyint
-from interception.constants import FilterKeyFlag, KeyFlag
-
-# ANSI colors and RESET for highlighting Terminal output
 from ansi import *
+from pxl_keys import DEVICES
 
-pyint.auto_capture_devices( keyboard = True, mouse = False, verbose = True )
+# Import maps for key names and codes e.g., KEY_CODES[ 'esc' ] = 0x1 and KEY_NAMES[ 0x1 ] = 'esc'
+from pxl_keys import KEY_CODES, KEY_NAMES
 
 class PxlIntercept:
 
@@ -106,107 +98,17 @@ class PxlIntercept:
         print( f'ℹ️ {YELLOW}Closing PxlIntercept...{RESET}' )
         self.tpexec.shutdown( wait = True )
 
+pi = pyint.Interception()
 
-class PxlKbd:
+# Find our keyboard within the devices list
+my_hwid = DEVICES['keyboard']['handle']
+idx = 0
+for device in pi.devices:
+    hwid = device.get_HWID()
+    if hwid is not None and my_hwid in hwid:
+         pyint.set_devices( keyboard = idx )
+         break
+    idx += 1
 
-    def __init__( self, pxlintercept ):
-        self.pxlintercept = pxlintercept
-        self.running = False
-        self.context = None
-
-    def __enter__( self ):
-        """Context manager entry - start interception"""
-        # Create interception context
-        self.context = pyint.Interception()
-        
-        # Set filter to capture only keyboard key down events
-        self.context.set_filter( self.context.is_keyboard, FilterKeyFlag.FILTER_KEY_DOWN )
-
-
-        self.running = True
-        print( f'{GREEN}PxlKbd started - listening to keyboard device 2{RESET}' )
-        return self
-
-    def __exit__( self, exc_type, exc_val, exc_tb ):
-        """Context manager exit - stop interception"""
-        self.running = False
-        if self.context:
-            self.context.destroy()
-        print( f'{YELLOW}PxlKbd stopped{RESET}' )
-
-    def _handle_key_event( self, stroke ):
-        """Handle a key press event"""
-        scan_code = stroke.code
-        flags = stroke.flags
-        is_extended = bool( flags & KeyFlag.KEY_E0 )
-        
-        print( f'{GREEN}Scan Code: {scan_code:3d} | Flags: {flags:02X} | Extended: {is_extended}{RESET}' )
-        
-        # Exit on escape key (scan code 1)
-        if scan_code == 1:
-            print( f'{RED}Escape pressed - exiting{RESET}' )
-            self.running = False
-
-    def run( self ):
-        """Main event loop - capture and process keyboard events"""
-        print( f'{CYAN}Press any keys to see scan codes. Keys are BLOCKED from other applications.{RESET}' )
-        print( f'{CYAN}Press {YELLOW}ESC{RESET} to exit.{RESET}' )
-        
-        try:
-            while self.running:
-                # Wait for input with timeout to allow interruption
-                device = self.context.await_input( timeout_milliseconds = 100 )
-                if device is None:
-                    continue  # No event, continue loop
-
-                print( f'{CYAN}Event from Device: {device}{RESET}' )
-                
-                # Receive the stroke from the device
-                stroke = self.context.devices[device].receive()
-                if stroke is None:
-                    continue
-                
-                # Check if it's a keyboard stroke with key down
-                if isinstance( stroke, pyint.KeyStroke ) and stroke.flags == KeyFlag.KEY_DOWN:
-                    # Handle the key event
-                    self._handle_key_event( stroke )
-                    
-                    # BLOCK the key from reaching other applications
-                    # Only pass through if it's the escape key (scan code 1)
-                    if stroke.code == 1:
-                        # Allow escape to pass through for exit
-                        self.context.send( device, stroke )
-                    else:
-                        # Block all other keys - don't send them back
-                        pass
-                else:
-                    # Pass through non-key-down events
-                    self.context.send( device, stroke )
-                    
-        except KeyboardInterrupt:
-            print( f'{YELLOW}Interrupted by user{RESET}' )
-        except Exception as e:
-            print( f'{RED}Error in PxlKbd run loop: {e}{RESET}' )
-
-
-
-def main():
-    """Keyboard scan code viewer"""
-    print( f'{GREEN}=== Keyboard Scan Code Viewer ==={RESET}' )
-    print( f'{CYAN}Press any keys to see their scan codes.{RESET}' )
-    print( f'{CYAN}Press {YELLOW}ESC{RESET} to exit.' )
-    print()
-    
-    # Create PxlIntercept instance
-    pxlintercept = PxlIntercept( None )  # No app reference needed for testing
-    
-    # Create and run PxlKbd with context manager
-    with PxlKbd( pxlintercept ) as pxlkbd:
-        pxlkbd.run()
-    
-    # Clean up
-    pxlintercept.close()
-    print( f'{GREEN}Scan code viewer completed{RESET}' )
-
-if __name__ == '__main__':
-    main()
+# Begin capturing keyboard events (reports to terminal w/ device ID & code)
+pyint.capture_keyboard()

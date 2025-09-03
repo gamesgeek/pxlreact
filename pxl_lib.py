@@ -15,6 +15,34 @@ IGNORED_DELTAS = [ 17325, 24626, 16490, 62774, 63134, 35762 ]
 # Allow for this much fluctuation in color before considering it "different enough"
 COLOR_TOLERANCE = 8600
 
+HDC = ctypes.windll.user32.GetDC( 0 )
+WPT = wintypes.POINT()
+
+def write_json( data, filepath ):
+    """
+    Write dict to JSON
+    """
+    try:
+        with open( filepath, 'w' ) as file:
+            json.dump( data, file, indent = 2 )
+
+    except Exception as e:
+        print( f"Error writing JSON: {e}" )
+
+
+def read_json( filepath, mode = 'r' ):
+    """
+    Read JSON to dict
+    """
+    try:
+        with open( filepath, mode ) as file:
+            rawdata = json.load( file )
+            return rawdata
+
+    except Exception as e:
+        print( f"Error loading JSON file: {e}" )
+        return None
+
 
 def draw_mouse_indicator( x, y ):
     """
@@ -127,10 +155,6 @@ def rgb_to_hex( rgb ):
     return "#{:02x}{:02x}{:02x}".format( *rgb )
 
 
-HDC = ctypes.windll.user32.GetDC( 0 )
-WPT = wintypes.POINT()
-
-
 def get_mouse_pos():
     """
     Get the current position of the mouse cursor.
@@ -178,32 +202,6 @@ def circle_points():
     return points
 
 
-def write_json( data, filepath ):
-    """
-    Write dict to JSON
-    """
-    try:
-        with open( filepath, 'w' ) as file:
-            json.dump( data, file, indent = 2 )
-
-    except Exception as e:
-        print( f"Error writing JSON: {e}" )
-
-
-def read_json( filepath, mode = 'r' ):
-    """
-    Read JSON to dict
-    """
-    try:
-        with open( filepath, mode ) as file:
-            rawdata = json.load( file )
-            return rawdata
-
-    except Exception as e:
-        print( f"Error loading JSON file: {e}" )
-        return None
-
-
 def validate_color_at( x, y, color ):
     """
     Validate the color at the given coordinates (x, y) against the expected color.
@@ -221,3 +219,24 @@ def validate_color_at( x, y, color ):
         return False
 
     return pixel_color == color
+
+
+def find_best_pixel( color, min_x, min_y, max_x, max_y ):
+    """
+    Within the rectangle bounded by min_x, min_y, max_x, max_y, find the color that is closest to the
+    given color.
+    """
+    best_color = None
+    best_x = None
+    best_y = None
+    best_difference = float('inf')
+    for x in range( min_x, max_x ):
+        for y in range( min_y, max_y ):
+            c = get_pixel_color( x, y )
+            difference = get_color_difference( color, c )
+            if difference < best_difference:
+                best_difference = difference
+                best_color = c
+                best_x = x
+                best_y = y
+    return best_color, best_x, best_y, best_difference

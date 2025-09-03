@@ -474,9 +474,11 @@ def _listen_to_events(context: Interception, stop_button: str) -> None:
 
             stroke = context.devices[device].receive()
             if stroke is None:
+                print( 'None-stroke' )
                 continue
 
             if isinstance(stroke, KeyStroke) and stroke.code == stop.scan_code:
+                print( 'Stop-stroke' )
                 return
 
             # Only print the stroke if it is a key down stroke, that way we dont
@@ -488,6 +490,8 @@ def _listen_to_events(context: Interception, stop_button: str) -> None:
                 and stroke.flags == MouseButtonFlag.MOUSE_LEFT_BUTTON_DOWN
             ):
                 print(f"Received stroke {stroke} on device {device}")
+            else:
+                print( 'Other-stroke' )
             context.send(device, stroke)
     finally:
         context.destroy()

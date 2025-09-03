@@ -1,0 +1,10 @@
+---
+description: OS, language, and hardware details
+globs:
+alwaysApply: true
+---
+
+- `OS`: Windows 11 Pro
+- `Shell`: PowerShell 7.5.2
+- `Language`: Python 3.12.10
+- `Processor`:	AMD Ryzen 9 9950X3D 16-Core
