@@ -14,6 +14,19 @@ from pxl_keys import DEVICES
 # Import maps for key names and codes e.g., KEY_CODES[ 'esc' ] = 0x1 and KEY_NAMES[ 0x1 ] = 'esc'
 from pxl_keys import KEY_CODES, KEY_NAMES
 
+pi = pyint.Interception()
+
+# Find our keyboard within the devices list
+my_hwid = DEVICES['keyboard']['handle']
+
+idx = 0
+for device in pi.devices:
+    hwid = device.get_HWID()
+    if hwid is not None and my_hwid in hwid:
+         pyint.set_devices( keyboard = idx )
+         break
+    idx += 1
+
 class PxlIntercept:
 
     """
@@ -97,18 +110,3 @@ class PxlIntercept:
     def close( self ):
         print( f'ℹ️ {YELLOW}Closing PxlIntercept...{RESET}' )
         self.tpexec.shutdown( wait = True )
-
-pi = pyint.Interception()
-
-# Find our keyboard within the devices list
-my_hwid = DEVICES['keyboard']['handle']
-idx = 0
-for device in pi.devices:
-    hwid = device.get_HWID()
-    if hwid is not None and my_hwid in hwid:
-         pyint.set_devices( keyboard = idx )
-         break
-    idx += 1
-
-# Begin capturing keyboard events (reports to terminal w/ device ID & code)
-pyint.capture_keyboard()

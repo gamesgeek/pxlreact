@@ -1,0 +1,8 @@
+---
+description: Modifying files in ./pytinerception/src
+globs:
+alwaysApply: true
+---
+
+- pyinterception is a local clone of a third party library; do not modify files within this directory
+or any subdirectories unless explicitly instructed to do so

@@ -1,0 +1,8 @@
+---
+description: For now, focus on the "lite" GUI-less/headless implementation
+globs:
+alwaysApply: true
+---
+
+- We're working on pxlreact_lite and focusing on the GUI-less implementation for now; unless explicitly
+instructed, ignore pxl_gui.py, pxl_guiconst.py, and any tkinter-related info

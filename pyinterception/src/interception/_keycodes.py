@@ -339,7 +339,6 @@ _MAPPING.update(
     }
 )
 
-
 # Certain keys that are considered extended yet to not use the E0 indication prefix
 # See https://github.com/kennyhml/pyinterception/pull/36#issue-2600389258
 extended_keys = {

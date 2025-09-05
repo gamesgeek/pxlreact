@@ -17,6 +17,9 @@ DeviceList := {}
 filterMouseMove := 1
 filterKeyPress := 0
 
+; Initialize script start tick count (milliseconds since system start)
+scriptStartTick := A_TickCount
+
 AHI := AutoHotInterception()
 
 ; Device List
@@ -203,6 +206,11 @@ FormatHex(num) {
     return Format("{:04X}", num)
 }
 
+GetElapsedMs() {
+    global scriptStartTick
+    return A_TickCount - scriptStartTick
+}
+
 KeyboardEvent(id, code, state) {
     global lvKeyboard, filterKeyPress
     if (filterKeyPress && state)
@@ -211,26 +219,12 @@ KeyboardEvent(id, code, state) {
     keyName := GetKeyName("SC" scanCode)
     row := lvKeyboard.Add(, id, code, state, keyName)
     lvKeyboard.Modify(row, "Vis")
-
-    ; on key releases, print a comma-delim string of the key we pressed
-    if !state {
-        hexCode := Format("0x{:X}", code) ; Format scan code as hexadecimal with "0x" prefix
-        evtstr := id "," keyName "," hexCode
-        FileAppend(evtstr "`n", "keylog.txt")
-    }
-
 }
 
 MouseButtonEvent(id, code, state) {
     global lvMouse
     row := lvMouse.Add(, id, code, state, "", "", "Button")
     lvMouse.Modify(row, "Vis")
-    ; on mouse releases, print a comma-delim string of the button we pressed
-    ; if state = 0 or state = -1 {
-    ;     hexCode := Format("0x{:X}", code) ; Format scan code as hexadecimal with "0x" prefix
-    ;     evtstr := 'MOUSE' code "," hexCode
-    ;     FileAppend(evtstr "`n", "keylog.txt")
-    ; }
 }
 
 MouseAxisEvent(id, info, x, y) {

@@ -1,7 +1,9 @@
 # Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
 .editorconfig
 .style.yapf
-doc/deprecated.py.txt
+
 media/
+deprecated/
+
 *.dll
 *.lib

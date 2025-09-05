@@ -60,7 +60,6 @@ class PxlReactApp:
             tick_interval (int): How often to poll for pixel color changes; longer intervals may miss rapid changes or
                                  allow the mouse to "skip" pixels when in motion.
         """
-        # debug_func( "PxlReact.__init__", pixel_count, tick_interval )
         self.session_active = False
 
         self.PI = PxlIntercept( self )
@@ -165,7 +164,6 @@ class PxlReactApp:
         """
         Initialize GUI elements for mouse preview and pixel displays.
         """
-        # debug_func( "PxlReact.init_gui_elements" )
         layout = self.gui.layout_config
 
         # The "mouse preview area" displays information about the pixel under the mouse cursor and is updated
@@ -370,7 +368,6 @@ class Pxl:
         if screen_rgb and screen_rgb != self.rgb:
             # if self.index > 0:
             #     # Skip reporting color changes under the mouse to reduce spam during testing
-            #     debug_func( "Pxl.update_color", self.index, screen_rgb )
             self.rgb = screen_rgb
             self.hex = rgb_to_hex( self.rgb )
             self.updated = True
@@ -385,7 +382,6 @@ class Pxl:
         Args:
             pixel_reaction (PxlReaction): Reaction object defining how this pixel reacts to changes.
         """
-        # debug_func( "Pxl.set_reaction", self.index, pixel_reaction )
         self.reaction = pixel_reaction
 
 
@@ -410,7 +406,6 @@ class PxlReaction:
             reaction (callable): Function to execute when the reaction triggers.
             cooldown (float, optional): Cooldown time in seconds; default 0.5
         """
-        # debug_func( "PxlReaction.__init__", pxl.index, reaction_type, reaction_color, reaction, cooldown )
         self.pxl = pxl
         self.type = reaction_type
         self.reaction_color = reaction_color
@@ -441,7 +436,6 @@ class PxlReaction:
         """
         Call the reaction function then put this reaction into cooldown for the set duration.
         """
-        # debug_func( "PxlReaction.trigger", self.pxl.index )
         self.reaction()
         self.state = "cooldown"
         self.pxl_exec.submit( self.cooldown_and_reset )

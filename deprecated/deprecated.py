@@ -541,3 +541,31 @@
 #     """
 #     def __init__( self ):
 #         pass
+
+# def write_json( data, filepath ):
+#     """
+#     Write dict to JSON
+#     """
+#     try:
+#         with open( filepath, 'w' ) as file:
+#             json.dump( data, file, indent = 2 )
+
+#     except Exception as e:
+#         print( f"Error writing JSON: {e}" )
+
+
+# def read_json( filepath, mode = 'r' ):
+#     """
+#     Read JSON to dict
+#     """
+#     try:
+#         with open( filepath, mode ) as file:
+#             rawdata = json.load( file )
+#             return rawdata
+
+#     except Exception as e:
+#         print( f"Error loading JSON file: {e}" )
+#         return None
+# def rgb_to_hex( rgb ):
+#     """Convert an RGB tuple to a hexadecimal color."""
+#     return "#{:02x}{:02x}{:02x}".format( *rgb )

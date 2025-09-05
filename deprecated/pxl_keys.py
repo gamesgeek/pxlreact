@@ -105,10 +105,6 @@ KEY_CODES = {
     "Right": 0x14D
 }
 
-# Print a list of key names and their decimal codes, sorted in ascending order by code
-for k, v in sorted( KEY_CODES.items(), key = lambda x: x[1] ):
-    print( f'{k}: {v}' )
-
 # Convert key names to lowercase
 KEY_CODES = { v: k.lower() for k, v in KEY_CODES.items() }
 
