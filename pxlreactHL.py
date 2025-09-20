@@ -40,7 +40,7 @@ class PxlReactApp:
         # Window watch (replaces old 'check_session' method with its 'active' flag)
         self.winwatch = PxlWinWatch()
 
-        self.PI = PxlIntercept( self )
+        self.PI = PxlIntercept()
 
         self.pixel_count = 2
         self.tick_interval = 0.025
@@ -287,12 +287,12 @@ class PxlReactionRegistry:
     reaction_types = [ "react_if_color", "react_if_not_color" ]
 
     # The color of the pixels to look for to ensure we're "healthy and energetic"
-    hp_reaction_color = (167, 34, 46)
-    mp_reaction_color = (16, 53, 111)
+    hp_reaction_color = (169, 33, 42)
+    mp_reaction_color = (17, 61, 132)
 
     # How long our flasks take to recharge (don't try to use them more often than this)
-    hp_cooldown = 2.8
-    mp_cooldown = 2.3
+    hp_cooldown = 1.9
+    mp_cooldown = 3.0
 
     def __init__( self, app ):
         """
@@ -304,19 +304,18 @@ class PxlReactionRegistry:
             raise ValueError( f"Flask cooldowns: {self.hp_cooldown}/{self.mp_cooldown}" )
 
         self.app = app
-
         self.reactions_registry = {
             'HP1': {
-                'sx': 134,
-                'sy': 1275,
+                'sx': 164,
+                'sy': 1251,
                 'type': 'react_if_not_color',
                 'reaction_color': self.hp_reaction_color,
                 'cooldown': self.hp_cooldown,
                 'reaction': self.react_HP
             },
             'MP1': {
-                'sx': 2400,
-                'sy': 1364,
+                'sx': 2421,
+                'sy': 1336,
                 'type': 'react_if_not_color',
                 'reaction_color': self.mp_reaction_color,
                 'cooldown': self.mp_cooldown,

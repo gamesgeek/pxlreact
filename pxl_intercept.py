@@ -4,16 +4,18 @@ from itertools import cycle
 
 from concurrent.futures import ThreadPoolExecutor
 
-# Using local pyinterception files for better control and stability
-import pyinterception.src.interception as pyint
-from pyinterception.src.interception.constants import FilterKeyFlag, KeyFlag
-
 from ansi import *
+
+# Hardware Device IDs
 from pxl_keys import DEVICES
 
 # Import maps for key names and codes e.g., KEY_CODES[ 'esc' ] = 0x1 and KEY_NAMES[ 0x1 ] = 'esc'
+# These codes/names are customized for our hardware pulled directly from monitoring software
 from pxl_keys import KEY_CODES, KEY_NAMES
 
+# Using local pyinterception files for better control and stability
+from pyinterception.src.interception.constants import FilterKeyFlag, KeyFlag
+import pyinterception.src.interception as pyint
 pi = pyint.Interception()
 
 # Find our keyboard within the devices list
@@ -27,6 +29,11 @@ for device in pi.devices:
          break
     idx += 1
 
+class PxlKbd:
+
+    def __init__( self, pxlreact_app ):
+        pass
+
 class PxlIntercept:
 
     """
@@ -37,7 +44,7 @@ class PxlIntercept:
     cases like "pressing one key while holding another" which are typical in games. 
     """
 
-    def __init__( self, pxlreact_app ):
+    def __init__( self ):
 
         self.pi_cfg = {
             'max_workers': 5,
@@ -50,8 +57,6 @@ class PxlIntercept:
 
         mxw = self.pi_cfg[ 'max_workers' ]
         self.tpexec = ThreadPoolExecutor( max_workers = mxw, thread_name_prefix = 'PxlIntercept' )
-
-        self.app = pxlreact_app
 
         self.precompute_size = self.pi_cfg[ 'precompute_size' ]
         self.delays = {}

@@ -10,11 +10,7 @@ DEBUGGING = False
 
 # Certain common in-game events can trigger false-positives and reactions; examples include flashing lights,
 # electric shock, temporary dialogs, etc. This list lets us ignore these and avoid extra reactions.
-IGNORED_DELTAS = [ 17325, 24626, 16490, 62774, 63134, 35762, 18518 ]
-
-
-# Allow for this much fluctuation in color before considering it "different enough"
-COLOR_TOLERANCE = 8000
+IGNORED_DELTAS = [ 17325, 24626, 16490, 62774, 63134, 35762, 18518, 26521 ]
 
 
 HDC = ctypes.windll.user32.GetDC( 0 )
@@ -34,20 +30,34 @@ def get_pixel_color( x, y ):
     blue = ( pixel >> 16 ) & 0xFF
     return red, green, blue
 
+# Allow for this much fluctuation in color before considering it "different enough"
+COLOR_TOLERANCE = 8000
 
 def get_color_difference( c1, c2 ):
     """
-    Returns the sum of squared differences (SSD) between the two colors.
+    Calculate the sum of squared differences between two colors.
     """
     return sum( ( a - b ) ** 2 for a, b in zip( c1, c2 ) )
+
+def colors_different( c1, c2 ):
+    """
+    True when the SSD of two colors exceeds tolerance (colors are "different enough")
+    """
+    delta = get_color_difference( c1, c2 )
+    return delta not in IGNORED_DELTAS and delta > COLOR_TOLERANCE
+
 
 
 def colors_different( c1, c2 ):
     """
-    Return true if two colors are too different to be considered the same.
+    Return true if two colors are "too different" to be considered the same.
     """
     delta = get_color_difference( c1, c2 )
-    return delta not in IGNORED_DELTAS and delta > COLOR_TOLERANCE
+    different = delta not in IGNORED_DELTAS and delta > COLOR_TOLERANCE
+    # If different, print a highlighted message showing the delta (in case we want to add it to IGNORE) 
+    if different:
+        print( f"{YELLOW}{delta}{RE} (c1: {MAGENTA}{c1}{RE}, c2: {RED}{c2}{RE})" )
+    return different
 
 
 def colors_similar( c1, c2 ):
@@ -55,6 +65,7 @@ def colors_similar( c1, c2 ):
     Return true if two colors are similar enough to be considered the same.
     """
     return not colors_different( c1, c2 )
+
 
 def get_mouse_pos():
     """
@@ -86,11 +97,14 @@ def validate_color_at( x, y, color ):
     return pixel_color == color
 
 
+def rgb_to_hex( rgb ):
+    """Convert an RGB tuple to a hexadecimal color."""
+    return "#{:02x}{:02x}{:02x}".format( *rgb )
+
 def find_most_similar_pixel( color, mnx, mny, mxx, mxy ):
     """
     Within the rectangle bounded by mnx, mny, mxx, mxy, find the color that is closest to the
-    given color; useful to identify "good" pixels to monitor for color changes (e.g., the reddest
-    pixel among the Life orb).
+    given color.
     """
 
     # The most similar color and its x,y coordinates
@@ -100,8 +114,9 @@ def find_most_similar_pixel( color, mnx, mny, mxx, mxy ):
 
     smallest_difference = float('inf')
 
-    for x in range( mnx, mxx ):
-        for y in range( mny, mxy ):
+    # Search inclusively
+    for x in range( min( mnx, mxx ), max( mnx, mxx ) + 1 ):
+        for y in range( min( mny, mxy ), max( mny, mxy ) + 1 ):
 
             c = get_pixel_color( x, y )
             difference = get_color_difference( color, c )

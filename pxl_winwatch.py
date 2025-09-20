@@ -20,9 +20,9 @@ class PxlWinWatch:
         # The application we're monitoring; must be the active window
         self.target_app = 'Path of Exile 2'
 
-        self.marker_x = 19
-        self.marker_y = 1081
-        self.marker_color = ( 163, 156, 126 )
+        self.marker_x = 21
+        self.marker_y = 1084
+        self.marker_color = ( 129, 121, 91 )
 
         self._stop_event = threading.Event()
         self._thread = None
