@@ -2,20 +2,46 @@
 pxl_lib.py provides various utility functions for use throughout PxlReact; these may eventually find
 a home in their own class.
 """
+
 import ctypes
+import time
 from ctypes import wintypes
 from ansi import *
 
-DEBUGGING = False
 
 # Certain common in-game events can trigger false-positives and reactions; examples include flashing lights,
 # electric shock, temporary dialogs, etc. This list lets us ignore these and avoid extra reactions.
-IGNORED_DELTAS = [ 17325, 24626, 16490, 62774, 63134, 35762, 18518, 26521 ]
+
+# Allow for this much fluctuation in color before considering it "different enough"
+COLOR_TOLERANCE = 400
 
 
 HDC = ctypes.windll.user32.GetDC( 0 )
 WPT = wintypes.POINT()
 
+def get_active_window_rect():
+    """
+    Get the rectangle coordinates of the active window.
+    
+    Returns:
+        tuple[int, int, int, int]: (left, top, right, bottom) coordinates of the active window,
+                                  or None if no active window found.
+    """
+    try:
+        # Get the handle to the active window
+        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        if hwnd == 0:
+            return None
+            
+        # Get window rectangle
+        rect = wintypes.RECT()
+        success = ctypes.windll.user32.GetWindowRect( hwnd, ctypes.byref( rect ) )
+        if success == 0:
+            return None
+            
+        return rect.left, rect.top, rect.right, rect.bottom
+    except Exception:
+        return None
 
 def get_pixel_color( x, y ):
     """
@@ -30,9 +56,6 @@ def get_pixel_color( x, y ):
     blue = ( pixel >> 16 ) & 0xFF
     return red, green, blue
 
-# Allow for this much fluctuation in color before considering it "different enough"
-COLOR_TOLERANCE = 8000
-
 def get_color_difference( c1, c2 ):
     """
     Calculate the sum of squared differences between two colors.
@@ -44,21 +67,7 @@ def colors_different( c1, c2 ):
     True when the SSD of two colors exceeds tolerance (colors are "different enough")
     """
     delta = get_color_difference( c1, c2 )
-    return delta not in IGNORED_DELTAS and delta > COLOR_TOLERANCE
-
-
-
-def colors_different( c1, c2 ):
-    """
-    Return true if two colors are "too different" to be considered the same.
-    """
-    delta = get_color_difference( c1, c2 )
-    different = delta not in IGNORED_DELTAS and delta > COLOR_TOLERANCE
-    # If different, print a highlighted message showing the delta (in case we want to add it to IGNORE) 
-    if different:
-        print( f"{YELLOW}{delta}{RE} (c1: {MAGENTA}{c1}{RE}, c2: {RED}{c2}{RE})" )
-    return different
-
+    return delta > COLOR_TOLERANCE
 
 def colors_similar( c1, c2 ):
     """
@@ -66,7 +75,22 @@ def colors_similar( c1, c2 ):
     """
     return not colors_different( c1, c2 )
 
+def get_mouse_pos_window():
+    """
+    Get the current position of the mouse cursor in window-relative space.
+    """
+    hwnd = ctypes.windll.user32.GetForegroundWindow()
+    if hwnd == 0:
+        return None
+    rect = wintypes.RECT()
+    success = ctypes.windll.user32.GetWindowRect( hwnd, ctypes.byref( rect ) )
+    if success == 0:
+        return None
 
+    ctypes.windll.user32.GetCursorPos( ctypes.byref( WPT ) )
+
+    return WPT.x - rect.left, WPT.y - rect.top
+    
 def get_mouse_pos():
     """
     Get the current position of the mouse cursor.
@@ -76,7 +100,6 @@ def get_mouse_pos():
     """
     ctypes.windll.user32.GetCursorPos( ctypes.byref( WPT ) )
     return WPT.x, WPT.y
-
 
 def validate_color_at( x, y, color ):
     """
@@ -95,7 +118,6 @@ def validate_color_at( x, y, color ):
         return False
 
     return pixel_color == color
-
 
 def rgb_to_hex( rgb ):
     """Convert an RGB tuple to a hexadecimal color."""
@@ -128,4 +150,40 @@ def find_most_similar_pixel( color, mnx, mny, mxx, mxy ):
                 msy = y
 
     return msc, msx, msy, smallest_difference
+
+def report_color_at( x, y ):
+    """
+    Print the RGB color value at the specified coordinates.
+    
+    Args:
+        x (int): The x-coordinate of the pixel.
+        y (int): The y-coordinate of the pixel.
+    
+    Output format: (x, y) - (r, g, b) - 0xdddddd - #dddddd
+    """
+    color = get_pixel_color( x, y )
+    if color is None:
+        print( f"{RED}Error: Could not read pixel at ({x}, {y}){RESET}" )
+        return
+    
+    r, g, b = color
+    hex_int = f"0x{r:02x}{g:02x}{b:02x}"
+    hex_hash = f"#{r:02x}{g:02x}{b:02x}"
+    
+    print( f"({MAGENTA}{x}{RESET}, {MAGENTA}{y}{RESET}) - "
+           f"({MAGENTA}{r}{RESET}, {MAGENTA}{g}{RESET}, {MAGENTA}{b}{RESET}) - "
+           f"{MAGENTA}{hex_int}{RESET} - {MAGENTA}{hex_hash}{RESET}" )
+
+def report_mouse_color( delay = 1 ):
+    """
+    Get the current mouse position, wait for the specified delay, then report the color at that position.
+    
+    Args:
+        delay (float): The delay in seconds before reading the color (default: 1 second).
+                      This allows the user to move the cursor away to avoid hover state interference.
+    """
+    x, y = get_mouse_pos()
+    time.sleep( delay )
+    report_color_at( x, y )
+
 

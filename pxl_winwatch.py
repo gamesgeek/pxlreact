@@ -18,11 +18,11 @@ class PxlWinWatch:
         self.active = False
 
         # The application we're monitoring; must be the active window
-        self.target_app = 'Path of Exile 2'
+        self.target_app = 'Grim Dawn'
 
-        self.marker_x = 21
-        self.marker_y = 1084
-        self.marker_color = ( 129, 121, 91 )
+        self.marker_x = 666
+        self.marker_y = 1371
+        self.marker_color = ( 122, 111, 89 )
 
         self._stop_event = threading.Event()
         self._thread = None
@@ -34,6 +34,8 @@ class PxlWinWatch:
         return validate_color_at( self.marker_x, self.marker_y, self.marker_color )
 
     def in_target_app( self ):
+        # wintitle = win32gui.GetWindowText( win32gui.GetForegroundWindow() )
+        # print( f"PxlWinWatch: wintitle: {wintitle}" )
         return self.target_app == win32gui.GetWindowText( win32gui.GetForegroundWindow() )
 
     def update( self ):

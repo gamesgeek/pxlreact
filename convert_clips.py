@@ -7,22 +7,22 @@ capture_format = "mp4"
 clip_dst = r"C:/Users/games/Videos"
 
 ffmpeg_config = {
-    # Video settings
+    # Video settings - optimized for quality while maintaining reasonable file sizes
     "video_codec": "libx264",
-    "preset": "fast",
-    "crf": 23,
+    "preset": "medium",  # Better compression efficiency than "fast"
+    "crf": 20,           # Lower CRF for noticeably better quality (was 23)
     "fps": 60,
     "scale_height": 1080,  # Maintain aspect ratio with width = -2
     "pixel_format": "yuv420p",
 
-    # Audio settings - suitable for clear speech and general gameplay audio
+    # Audio settings - enhanced for clearer speech and gameplay audio
     "audio_codec": "aac",
-    "audio_bitrate": "160k",
+    "audio_bitrate": "192k",  # Higher bitrate for clearer audio (was 160k)
     "audio_channels": 2,
     "audio_sample_rate": 48000,
 
-    # Extra args if you want to tweak encoding (e.g., ["-movflags", "+faststart"])
-    "extra_args": []
+    # Extra args for better quality and compatibility
+    "extra_args": ["-movflags", "+faststart"]  # Better streaming/playback
 }
 
 import argparse

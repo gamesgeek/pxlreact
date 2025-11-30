@@ -18,9 +18,12 @@ from pxl_intercept import PxlIntercept
 from pxl_lib import *
 from ansi import *
 
-# Define keybinds for PxlReact
+# Define keybinds for PxlReact;
+# - F12 exits the application
+# - CTRL-P reports the color at the mouse cursor
 KEYBINDS = {
-    "f12": lambda app: app.exit_application()
+    "f12": lambda app: app.exit_application(),
+    "ctrl+p": lambda app: report_mouse_color()
 }
 
 class PxlReactApp:
@@ -261,7 +264,7 @@ class PxlReaction:
         if self.state != "ready" or not self.pxl.app.winwatch.active:
             return False
 
-        return colors_different( self.pxl.rgb, self.reaction_color )
+        return colors_similar( self.pxl.rgb, self.reaction_color )
 
     def trigger( self ):
         """
@@ -279,6 +282,7 @@ class PxlReaction:
         self.state = "ready"
         # When a reaction comes off cooldown, check to see if it's pixel is in a trigger state
         if self.should_trigger():
+            print( "Wakeup trigger firing!" )
             self.trigger()
 
 
@@ -287,12 +291,12 @@ class PxlReactionRegistry:
     reaction_types = [ "react_if_color", "react_if_not_color" ]
 
     # The color of the pixels to look for to ensure we're "healthy and energetic"
-    hp_reaction_color = (169, 33, 42)
-    mp_reaction_color = (17, 61, 132)
+    hp_reaction_color = (8, 8, 5)
+    mp_reaction_color = (22, 18, 12)
 
     # How long our flasks take to recharge (don't try to use them more often than this)
-    hp_cooldown = 1.9
-    mp_cooldown = 3.0
+    hp_cooldown = 17
+    mp_cooldown = 17
 
     def __init__( self, app ):
         """
@@ -300,38 +304,61 @@ class PxlReactionRegistry:
         """
 
         # Safeguard against random typos that have gotten me killed before...
-        if self.hp_cooldown > 5 or self.mp_cooldown > 5:
-            raise ValueError( f"Flask cooldowns: {self.hp_cooldown}/{self.mp_cooldown}" )
+        # Temporarily disabled - Grim Dawn has longer cooldowns for now
+        # if self.hp_cooldown > 5 or self.mp_cooldown > 5:
+        #     raise ValueError( f"Flask cooldowns: {self.hp_cooldown}/{self.mp_cooldown}" )
 
         self.app = app
+
         self.reactions_registry = {
             'HP1': {
-                'sx': 164,
-                'sy': 1251,
-                'type': 'react_if_not_color',
+                'sx': 1088,
+                'sy': 1350,
+                'type': 'react_if_color',
                 'reaction_color': self.hp_reaction_color,
                 'cooldown': self.hp_cooldown,
                 'reaction': self.react_HP
             },
             'MP1': {
-                'sx': 2421,
-                'sy': 1336,
-                'type': 'react_if_not_color',
+                'sx': 1487,
+                'sy': 1355,
+                'type': 'react_if_color',
                 'reaction_color': self.mp_reaction_color,
                 'cooldown': self.mp_cooldown,
                 'reaction': self.react_MP
             }
         }
 
+        self.clock = time.perf_counter
+        
+        self.last_reaction_ticks = {
+            'HP1': None,
+            'MP1': None
+        }
+
         self.validate_registry()
 
     def react_HP( self ):
-        self.app.PI.press( "1" )
-        print( f"+❤️" )
+        self.app.PI.press( "r" )
+        self._log_reaction( 'HP1', "+❤️+" )
 
     def react_MP( self ):
-        self.app.PI.press( "2" )
-        print( f"+✨" )
+        self.app.PI.press( "e" )
+        self._log_reaction( 'MP1', "*✨*" )
+
+    def _log_reaction( self, key, glyph ):
+        now_tick = self.clock()
+        last_tick = self.last_reaction_ticks.get( key )
+        delta_text = "--"
+
+        if last_tick is not None:
+            delta_seconds = now_tick - last_tick
+            delta_text = f"{delta_seconds:.2f}s"
+
+        self.last_reaction_ticks[ key ] = now_tick
+
+        now_wall = time.strftime( "%H:%M:%S", time.localtime() )
+        print( f"{glyph} {MAGENTA}{now_wall}{RESET} Δt {MAGENTA}{delta_text}{RESET}" )
 
     def validate_registry( self ):
         """

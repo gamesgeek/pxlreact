@@ -566,4 +566,6 @@
 #     except Exception as e:
 #         print( f"Error loading JSON file: {e}" )
 #         return None
-
+# def rgb_to_hex( rgb ):
+#     """Convert an RGB tuple to a hexadecimal color."""
+#     return "#{:02x}{:02x}{:02x}".format( *rgb )

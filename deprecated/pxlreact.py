@@ -51,7 +51,7 @@ class PxlReactApp:
     PxlReactApp is the main application class for the PxlReact project; it initializes the GUI and manages the list of
     pixels being monitored (formerly PxlWatcher).
     """
-
+# 32, 28, 21
     def __init__( self, pixel_count = 4, tick_interval = 25 ):
         """
         Args:
@@ -62,7 +62,7 @@ class PxlReactApp:
         """
         self.session_active = False
 
-        self.PI = PxlIntercept( self )
+        self.PI = PxlIntercept()
         self.pixel_count = pixel_count
         self.tick_interval = tick_interval
 
@@ -70,9 +70,11 @@ class PxlReactApp:
         self.pixels = [ None ] * ( pixel_count + 1 )
         self.pixels[ 0 ] = Pxl( index = 0 ) # Mouse preview pixel
 
+        self.pixels[ 1 ] = Pxl( 1, 1487, 1355, app = self )
+
         # Add regular pixels starting at index 1; assign arbitrary initial pixel coordinates and
         # pass a reference to ourselves so Pxl's can remember us
-        for i in range( 1, pixel_count + 1 ):
+        for i in range( 2, pixel_count + 1 ):
             self.pixels[ i ] = Pxl( i, i * 11, i * 11, app = self )
 
         # PxlGui initializes a layout_config dict which provides settings to size & position elements
@@ -147,8 +149,8 @@ class PxlReactApp:
         Check if the session is active and update the session_active state.
         """
         global LAST_WIN
-        # self.session_active = True
-        # return
+        self.session_active = True
+        return
         # Make sure the currently active window shares a title with the application we're testing
         active_window = win32gui.GetForegroundWindow()
         LAST_WIN = win32gui.GetWindowText( active_window )
@@ -476,21 +478,21 @@ class PxlReactionRegistry:
 
         self.reactions_registry = {
             'HP1': {
-                'sx': 134,
-                'sy': 1275,
+                'sx': 1088,
+                'sy': 1350,
                 'type': 'react_if_not_color',
                 'reaction_color': self.hp_reaction_color,
                 'cooldown': self.hp_cooldown,
                 'reaction': self.react_HP
             },
-            'MP1': {
-                'sx': 2400,
-                'sy': 1364,
-                'type': 'react_if_not_color',
-                'reaction_color': self.mp_reaction_color,
-                'cooldown': self.mp_cooldown,
-                'reaction': self.react_MP
-            }
+            # 'MP1': {
+            #     'sx': 2400,
+            #     'sy': 1364,
+            #     'type': 'react_if_not_color',
+            #     'reaction_color': self.mp_reaction_color,
+            #     'cooldown': self.mp_cooldown,
+            #     'reaction': self.react_MP
+            # }
         }
 
         self.validate_registry()
