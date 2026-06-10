@@ -14,7 +14,6 @@ from pxl_keys import DEVICES
 from pxl_keys import KEY_CODES, KEY_NAMES
 
 # Using local pyinterception files for better control and stability
-from pyinterception.src.interception.constants import FilterKeyFlag, KeyFlag
 import pyinterception.src.interception as pyint
 pi = pyint.Interception()
 
@@ -29,10 +28,6 @@ for device in pi.devices:
          break
     idx += 1
 
-class PxlKbd:
-
-    def __init__( self, pxlreact_app ):
-        pass
 
 class PxlIntercept:
 

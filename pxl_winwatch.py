@@ -18,11 +18,11 @@ class PxlWinWatch:
         self.active = False
 
         # The application we're monitoring; must be the active window
-        self.target_app = 'Grim Dawn'
+        self.target_app = 'Path of Exile 2'
 
-        self.marker_x = 666
-        self.marker_y = 1371
-        self.marker_color = ( 122, 111, 89 )
+        self.marker_x = 19
+        self.marker_y = 1083
+        self.marker_color = ( 149, 142, 114 )
 
         self._stop_event = threading.Event()
         self._thread = None
@@ -48,7 +48,8 @@ class PxlWinWatch:
         """
         in_app = self.in_target_app()
         marker_ok = self.marker_ok()
-        print( f"PxlWinWatch: app: {in_app} marker: {marker_ok}" )
+        if not in_app or not marker_ok:
+            print( f"PxlWinWatch: app: {in_app} marker: {marker_ok}" )
         self.active = in_app and marker_ok
 
     def start( self ):

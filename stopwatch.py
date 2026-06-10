@@ -3,6 +3,7 @@ import time
 import threading
 import argparse
 from pynput import keyboard
+from pynput.keyboard import Key, KeyCode
 from ansi import *
 
 
@@ -15,7 +16,7 @@ class Stopwatch:
         # Keybinding configuration dictionary
         if hold_timer_mode:
             self.keybinds = {
-                'start_stop': keyboard.Key.space,  # Press to start, release to stop
+                'start_stop': keyboard.Key.f9,  # Press to start, release to stop
                 'reset': keyboard.Key.f10,
                 'exit': keyboard.Key.f11
             }

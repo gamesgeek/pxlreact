@@ -5,7 +5,6 @@ lighter weight command line interface.
 This is the project's main module which is responsible for assigning reactions to pixels and then
 polling those pixels for changes.
 """
-import keyboard
 import ctypes
 import time
 
@@ -14,17 +13,12 @@ import threading
 
 from pxl_winwatch import PxlWinWatch
 from pxl_intercept import PxlIntercept
+from pxl_remap import PxlRemapper
 
 from pxl_lib import *
 from ansi import *
 
-# Define keybinds for PxlReact;
-# - F12 exits the application
-# - CTRL-P reports the color at the mouse cursor
-KEYBINDS = {
-    "f12": lambda app: app.exit_application(),
-    "ctrl+p": lambda app: report_mouse_color()
-}
+from pxl_remap_maps import ACTIONS, ROTATIONS, REMAPS
 
 class PxlReactApp:
     """
@@ -45,9 +39,14 @@ class PxlReactApp:
 
         self.PI = PxlIntercept()
 
+        self.stop_event = threading.Event()
+
+        # Keyboard-capture remapping layer (starts its own background thread); also owns the
+        # F12/ESC quit and Ctrl+P report-color command hotkeys
+        self.remapper = PxlRemapper( self.winwatch, ACTIONS, ROTATIONS, REMAPS, on_quit = self.exit_application )
+
         self.pixel_count = 2
         self.tick_interval = 0.025
-        self.stop_event = threading.Event()
 
         # Initialize the list; index 0 is unused in lite (no mouse preview)
         self.pixels = [ None ] * ( self.pixel_count + 1 )
@@ -61,9 +60,7 @@ class PxlReactApp:
 
         self.load_reaction( 1, "HP1" )
         self.load_reaction( 2, "MP1" )
-
-        for key_combination, action in KEYBINDS.items():
-            keyboard.add_hotkey( key_combination, action, args = [ self ] )
+        # self.load_reaction( 3, "CV1" )
 
     def start_update_loop( self ):
         """
@@ -144,16 +141,15 @@ class PxlReactApp:
         Clean up resources and background workers. Safe to call multiple times.
         """
         global HDC
-        print( f"{RED}Exiting...{RE}" )
+        print( f"ℹ️ {RED}Exiting PxlReactApp...{RE}" )
         try:
-            keyboard.clear_all_hotkeys()
-            keyboard.unhook_all()
+            # Prevent new reaction submissions, then shut down reaction executor
+            PxlReaction.pxl_exec.shutdown( wait = False, cancel_futures = True )
         except Exception:
             pass
 
         try:
-            # Prevent new reaction submissions, then shut down reaction executor
-            PxlReaction.pxl_exec.shutdown( wait = False, cancel_futures = True )
+            self.remapper.stop()
         except Exception:
             pass
 
@@ -264,7 +260,7 @@ class PxlReaction:
         if self.state != "ready" or not self.pxl.app.winwatch.active:
             return False
 
-        return colors_similar( self.pxl.rgb, self.reaction_color )
+        return colors_different( self.pxl.rgb, self.reaction_color )
 
     def trigger( self ):
         """
@@ -291,12 +287,20 @@ class PxlReactionRegistry:
     reaction_types = [ "react_if_color", "react_if_not_color" ]
 
     # The color of the pixels to look for to ensure we're "healthy and energetic"
-    hp_reaction_color = (8, 8, 5)
-    mp_reaction_color = (22, 18, 12)
+
+    # (288, 1353) - (101, 183, 230)
+    cv_reaction_color = (101, 183, 230)
+
+    # (163, 1250) - (161, 32, 39) 
+    hp_reaction_color = (161, 32, 39)
+
+    # (2418, 1357) - (14, 47, 100)
+    mp_reaction_color = (14, 47, 100)
 
     # How long our flasks take to recharge (don't try to use them more often than this)
-    hp_cooldown = 17
-    mp_cooldown = 17
+    hp_cooldown = 5
+    mp_cooldown = 3
+    cv_cooldown = 30
 
     def __init__( self, app ):
         """
@@ -304,28 +308,35 @@ class PxlReactionRegistry:
         """
 
         # Safeguard against random typos that have gotten me killed before...
-        # Temporarily disabled - Grim Dawn has longer cooldowns for now
-        # if self.hp_cooldown > 5 or self.mp_cooldown > 5:
-        #     raise ValueError( f"Flask cooldowns: {self.hp_cooldown}/{self.mp_cooldown}" )
+        if self.hp_cooldown > 5 or self.mp_cooldown > 5:
+            raise ValueError( f"Flask cooldowns: {self.hp_cooldown}/{self.mp_cooldown}" )
 
         self.app = app
 
         self.reactions_registry = {
             'HP1': {
-                'sx': 1088,
-                'sy': 1350,
-                'type': 'react_if_color',
+                'sx': 163,
+                'sy': 1250,
+                'type': 'react_if_not_color',
                 'reaction_color': self.hp_reaction_color,
                 'cooldown': self.hp_cooldown,
                 'reaction': self.react_HP
             },
             'MP1': {
-                'sx': 1487,
-                'sy': 1355,
-                'type': 'react_if_color',
+                'sx': 2418,
+                'sy': 1357,
+                'type': 'react_if_not_color',
                 'reaction_color': self.mp_reaction_color,
                 'cooldown': self.mp_cooldown,
                 'reaction': self.react_MP
+            },
+            'CV1': {
+                'sx': 288,
+                'sy': 1353,
+                'type': 'react_if_not_color',
+                'reaction_color': self.cv_reaction_color,
+                'cooldown': self.cv_cooldown,
+                'reaction': self.react_CV
             }
         }
 
@@ -333,18 +344,23 @@ class PxlReactionRegistry:
         
         self.last_reaction_ticks = {
             'HP1': None,
-            'MP1': None
+            'MP1': None,
+            'CV1': None,
         }
 
         self.validate_registry()
 
     def react_HP( self ):
-        self.app.PI.press( "r" )
+        self.app.PI.press( "1" )
         self._log_reaction( 'HP1', "+❤️+" )
 
     def react_MP( self ):
-        self.app.PI.press( "e" )
+        self.app.PI.press( "2" )
         self._log_reaction( 'MP1', "*✨*" )
+
+    def react_CV( self ):
+        self.app.PI.press( "F" )
+        self._log_reaction( 'CV1', "~🧿~" )
 
     def _log_reaction( self, key, glyph ):
         now_tick = self.clock()

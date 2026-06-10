@@ -4,20 +4,33 @@ a home in their own class.
 """
 
 import ctypes
+import threading
 import time
 from ctypes import wintypes
 from ansi import *
 
-
-# Certain common in-game events can trigger false-positives and reactions; examples include flashing lights,
-# electric shock, temporary dialogs, etc. This list lets us ignore these and avoid extra reactions.
-
 # Allow for this much fluctuation in color before considering it "different enough"
-COLOR_TOLERANCE = 400
-
+COLOR_TOLERANCE = 4000
 
 HDC = ctypes.windll.user32.GetDC( 0 )
 WPT = wintypes.POINT()
+
+# Several threads (winwatch, the main poll loop, the remapper) read pixels through the single
+# shared screen DC. GDI is not safe for concurrent calls on one DC, so serialize access.
+_HDC_LOCK = threading.Lock()
+    
+
+def _refresh_hdc():
+    """
+    Release and re-acquire the cached screen DC. Used to recover from an invalid read, which can
+    happen if the DC has gone stale (display/mode change, DWM event). Call while holding _HDC_LOCK.
+    """
+    global HDC
+    try:
+        ctypes.windll.user32.ReleaseDC( 0, HDC )
+    except Exception:
+        pass
+    HDC = ctypes.windll.user32.GetDC( 0 )
 
 def get_active_window_rect():
     """
@@ -45,11 +58,22 @@ def get_active_window_rect():
 
 def get_pixel_color( x, y ):
     """
-    Retrieve the rgb values of the pixel at coordinates (x, y)
+    Retrieve the rgb values of the pixel at coordinates (x, y).
+
+    Reads are serialized on _HDC_LOCK to avoid concurrent GDI access to the shared screen DC, which
+    returns CLR_INVALID (-1) under contention. A single failed read is retried once after refreshing
+    the DC; only a second failure is treated as a genuine bad read.
     """
-    pixel = ctypes.windll.gdi32.GetPixel( HDC, x, y )
-    if pixel == -1:
-        return None
+    with _HDC_LOCK:
+        pixel = ctypes.windll.gdi32.GetPixel( HDC, x, y )
+
+        if pixel == -1:
+            _refresh_hdc()
+            pixel = ctypes.windll.gdi32.GetPixel( HDC, x, y )
+
+            if pixel == -1:
+                print( f'{MAGENTA}\tbad read at {YELLOW}{x}{RE}, {YELLOW}{y}{RE}' )
+                return None
 
     red = pixel & 0xFF
     green = ( pixel >> 8 ) & 0xFF
@@ -67,6 +91,8 @@ def colors_different( c1, c2 ):
     True when the SSD of two colors exceeds tolerance (colors are "different enough")
     """
     delta = get_color_difference( c1, c2 )
+    # if delta > COLOR_TOLERANCE:
+    #     print( f"Color difference: {delta}" )
     return delta > COLOR_TOLERANCE
 
 def colors_similar( c1, c2 ):
@@ -117,6 +143,10 @@ def validate_color_at( x, y, color ):
     if pixel_color is None:
         return False
 
+    # validated = pixel_color == color
+    # if not validated:
+    #     print( pixel_color )
+
     return pixel_color == color
 
 def rgb_to_hex( rgb ):
@@ -151,17 +181,19 @@ def find_most_similar_pixel( color, mnx, mny, mxx, mxy ):
 
     return msc, msx, msy, smallest_difference
 
-def report_color_at( x, y ):
+def report_color_at( x, y, color = None ):
     """
     Print the RGB color value at the specified coordinates.
-    
+
     Args:
         x (int): The x-coordinate of the pixel.
         y (int): The y-coordinate of the pixel.
-    
+        color (tuple[int, int, int] | None): A pre-read color to report; if None, the pixel is read.
+
     Output format: (x, y) - (r, g, b) - 0xdddddd - #dddddd
     """
-    color = get_pixel_color( x, y )
+    if color is None:
+        color = get_pixel_color( x, y )
     if color is None:
         print( f"{RED}Error: Could not read pixel at ({x}, {y}){RESET}" )
         return
@@ -186,4 +218,60 @@ def report_mouse_color( delay = 1 ):
     time.sleep( delay )
     report_color_at( x, y )
 
+
+class PixelMonitor:
+    """
+    Toggleable background watcher for a single pixel, intended for screen discovery.
+
+    On start it captures the current mouse position, waits an initial settle delay (so the cursor
+    can be moved away and any hover state can clear), then polls that fixed coordinate and reports
+    the color only when it changes - each distinct color is printed once, not on every poll.
+    """
+
+    def __init__( self, delay = 1.0, interval = 0.1 ):
+        self.delay = delay
+        self.interval = interval
+        self._thread = None
+        self._stop = threading.Event()
+        self._x = None
+        self._y = None
+        self._last = None
+
+    @property
+    def active( self ):
+        return self._thread is not None and self._thread.is_alive()
+
+    def toggle( self ):
+        """Start the monitor if stopped, otherwise stop it."""
+        if self.active:
+            self.stop()
+        else:
+            self.start()
+
+    def start( self ):
+        if self.active:
+            return
+        self._x, self._y = get_mouse_pos()
+        self._last = None
+        self._stop.clear()
+        self._thread = threading.Thread( target = self._run, name = 'PixelMonitor', daemon = True )
+        self._thread.start()
+        print( f"👁️ {GREEN}pixel monitor on{RESET} ({MAGENTA}{self._x}{RESET}, {MAGENTA}{self._y}{RESET})" )
+
+    def stop( self ):
+        if not self.active:
+            return
+        self._stop.set()
+        print( f"👁️ {YELLOW}pixel monitor off{RESET}" )
+
+    def _run( self ):
+        # Initial settle delay so the cursor can move away / hover states can clear
+        if self._stop.wait( self.delay ):
+            return
+        while not self._stop.is_set():
+            color = get_pixel_color( self._x, self._y )
+            if color is not None and color != self._last:
+                self._last = color
+                report_color_at( self._x, self._y, color )
+            self._stop.wait( self.interval )
 

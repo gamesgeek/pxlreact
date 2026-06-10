@@ -7,22 +7,22 @@ capture_format = "mp4"
 clip_dst = r"C:/Users/games/Videos"
 
 ffmpeg_config = {
-    # Video settings
+    # Video settings - optimized for quality while maintaining reasonable file sizes
     "video_codec": "libx264",
-    "preset": "veryfast",
-    "crf": 23,
-    "fps": 30,
+    "preset": "medium",  # Better compression efficiency than "fast"
+    "crf": 20,           # Lower CRF for noticeably better quality (was 23)
+    "fps": 60,
     "scale_height": 1080,  # Maintain aspect ratio with width = -2
     "pixel_format": "yuv420p",
 
-    # Audio settings - suitable for clear speech and general gameplay audio
+    # Audio settings - enhanced for clearer speech and gameplay audio
     "audio_codec": "aac",
-    "audio_bitrate": "160k",
+    "audio_bitrate": "192k",  # Higher bitrate for clearer audio (was 160k)
     "audio_channels": 2,
     "audio_sample_rate": 48000,
 
-    # Extra args if you want to tweak encoding (e.g., ["-movflags", "+faststart"])
-    "extra_args": []
+    # Extra args for better quality and compatibility
+    "extra_args": ["-movflags", "+faststart"]  # Better streaming/playback
 }
 
 import argparse
@@ -31,7 +31,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Tuple, Dict
+
+# Delete any source clip shorter than this many seconds (treated as canceled/misclick)
+MIN_KEEP_SECONDS = 5.0
 
 
 def find_capture_files( root: Path, pattern: str, extension: str ) -> List[ Path ]:
@@ -201,10 +204,12 @@ def main():
 
     # Pre-probe durations for files that need conversion
     total_seconds = 0.0
+    durations: Dict[ Path, float ] = {}
     if not args.no_metrics:
         for src, dst in plan:
             if args.overwrite or not dst.exists():
                 dur = run_ffprobe_duration_seconds( src )
+                durations[ src ] = dur
                 total_seconds += dur
 
     if total_seconds > 0:
@@ -213,9 +218,21 @@ def main():
     converted = 0
     skipped = 0
     failed = 0
+    deleted_short = 0
 
     t0 = time.perf_counter()
     for idx, ( src, dst ) in enumerate( plan, start = 1 ):
+        # Always determine duration to enforce short-clip deletion
+        dur = durations.get( src ) if src in durations else run_ffprobe_duration_seconds( src )
+        if dur > 0.0 and dur < MIN_KEEP_SECONDS:
+            try:
+                src.unlink()
+                deleted_short += 1
+                print( f"[{idx}/{len(plan)}] {YELLOW}Delete short{RE} ({MAGENTA}{human_time(dur)}{RE}) → {CYAN}{src.name}{RE}" )
+            except Exception as e:
+                print( f"[{idx}/{len(plan)}] {YELLOW}Warning could not delete short clip{RE}: {CYAN}{src}{RE} — {e}" )
+            continue
+
         if not args.overwrite and dst.exists():
             skipped += 1
             print( f"[{idx}/{len(plan)}] {YELLOW}Skip exists{RE} → {CYAN}{dst.name}{RE}" )
@@ -238,7 +255,7 @@ def main():
 
     # Report
     print()
-    print( f"{B_CYAN}Summary{RE}: converted={MAGENTA}{converted}{RE}, skipped={MAGENTA}{skipped}{RE}, failed={MAGENTA}{failed}{RE}" )
+    print( f"{B_CYAN}Summary{RE}: converted={MAGENTA}{converted}{RE}, skipped={MAGENTA}{skipped}{RE}, failed={MAGENTA}{failed}{RE}, deleted<5s={MAGENTA}{deleted_short}{RE}" )
     if not args.no_metrics:
         rt = ( total_seconds / elapsed ) if elapsed > 0 else 0.0
         print( f"{CYAN}Encoding time{RE}: {MAGENTA}{human_time(elapsed)}{RE} ({elapsed:.1f}s)  |  speed≈{MAGENTA}{rt:.2f}x realtime{RE}" )
