@@ -16,13 +16,16 @@ from dataclasses import dataclass, field
 
 # Local pyinterception clone (do not modify)
 import pyinterception.src.interception as pyint
-from pyinterception.src.interception.constants import KeyFlag, FilterKeyFlag
-from pyinterception.src.interception.strokes import KeyStroke
+from pyinterception.src.interception.constants import KeyFlag, FilterKeyFlag, MouseFlag, MouseButtonFlag
+from pyinterception.src.interception.strokes import KeyStroke, MouseStroke
 from pyinterception.src.interception._keycodes import get_key_information
 
 from pxl_keys import DEVICES
 from pxl_lib import get_pixel_color, colors_similar, PixelMonitor
 from ansi import *
+
+# Substitute values for Action.key that send a mouse click at the current cursor position
+MOUSE_BUTTONS = frozenset( ( 'left', 'right', 'middle' ) )
 
 
 def _detect_keyboard_index():
@@ -44,19 +47,34 @@ def _detect_keyboard_index():
     return None
 
 
+def _detect_mouse_index():
+    """
+    Find the interception device index matching our configured mouse HWID. Returns the index, or
+    None if no match is found (callers should fall back to the context default).
+    """
+    my_hwid = DEVICES[ 'mouse' ][ 'handle' ]
+    probe = pyint.Interception()
+    try:
+        idx = 0
+        for device in probe.devices:
+            hwid = device.get_HWID()
+            if hwid is not None and my_hwid in hwid:
+                return idx
+            idx += 1
+    finally:
+        probe.destroy()
+    return None
+
+
 @dataclass
 class Action:
     """
-    A single game action: a key to send, gated by an optional cooldown and an optional pixel-color
-    check, with an optional cast time during which other actions must not interrupt it.
+    A single game action: a substitute to send (keyboard key or mouse button), gated by an optional
+    cooldown and an optional pixel-color check, with an optional cast time during which other
+    actions must not interrupt it.
 
-    The two former entry types collapse into this one model:
-    - no color gate (color is None) behaves like the old "timed" entry
-    - no cooldown / cast_time behaves like the old "pixel" entry
-    - both may be defined simultaneously
-
-    Instances are shared across rotations (one per ACTIONS entry), so `last` reflects a single,
-    character-global cooldown regardless of which remap key triggered the action.
+    For `key`, use a keyboard key name (e.g. "e") or a mouse button: "left", "right", or "middle".
+    Mouse substitutes click at the current cursor position without moving the pointer.
     """
 
     name: str
@@ -129,9 +147,12 @@ def build_actions( actions_cfg ):
     out = {}
     for name, c in actions_cfg.items():
         cc = c.get( 'color_check' ) or {}
+        key = c[ 'key' ]
+        if key.lower() in MOUSE_BUTTONS:
+            key = key.lower()
         out[ name ] = Action(
             name = name,
-            key = c[ 'key' ],
+            key = key,
             cooldown = c.get( 'cooldown', 0.0 ),
             cast_time = c.get( 'cast_time', 0.0 ),
             px = cc.get( 'px' ),
@@ -209,6 +230,14 @@ class PxlRemapper:
         else:
             print( f"⚠️ {YELLOW}PxlRemapper: keyboard HWID not matched; using default device "
                    f"{MAGENTA}{self.ctx.keyboard}{RESET}" )
+
+        midx = _detect_mouse_index()
+        if midx is not None:
+            self.ctx.mouse = midx
+            print( f"ℹ️ {GREEN}PxlRemapper{RESET}: mouse device {MAGENTA}{midx}{RESET}" )
+        else:
+            print( f"⚠️ {YELLOW}PxlRemapper: mouse HWID not matched; using default device "
+                   f"{MAGENTA}{self.ctx.mouse}{RESET}" )
 
         # Command hotkey scan codes; ctrl shares scan 0x1D for both left/right (E0 distinguishes)
         self._sc_esc = get_key_information( 'esc' ).scan_code
@@ -376,9 +405,24 @@ class PxlRemapper:
 
     def _press_substitute( self, key ):
         """
-        Inject a single press of `key` through the capture context. Modifier-bearing substitutes
-        (uppercase / symbols) are not supported here; game-skill remaps use bare keys.
+        Inject a single press of `key` through the capture context.
+
+        `key` may be a keyboard key name or a mouse button (left / right / middle). Keyboard
+        substitutes use KeyStrokes on ctx.keyboard; mouse substitutes send button down/up on
+        ctx.mouse at the current cursor position (no pointer move). Modifier-bearing keyboard
+        substitutes are not supported; game remaps use bare keys or mouse buttons.
         """
+        hold = random.uniform( self.MIN_HOLD, self.MAX_HOLD )
+        btn = key.lower()
+        if btn in MOUSE_BUTTONS:
+            down_flag, up_flag = MouseButtonFlag.from_string( btn )
+            self.ctx.send( self.ctx.mouse,
+                           MouseStroke( MouseFlag.MOUSE_MOVE_ABSOLUTE, down_flag, 0, 0, 0 ) )
+            time.sleep( hold )
+            self.ctx.send( self.ctx.mouse,
+                           MouseStroke( MouseFlag.MOUSE_MOVE_ABSOLUTE, up_flag, 0, 0, 0 ) )
+            return
+
         info = get_key_information( key )
 
         down = KeyStroke( info.scan_code, KeyFlag.KEY_DOWN )
@@ -388,7 +432,7 @@ class PxlRemapper:
             up.flags |= KeyFlag.KEY_E0
 
         self.ctx.send( self.ctx.keyboard, down )
-        time.sleep( random.uniform( self.MIN_HOLD, self.MAX_HOLD ) )
+        time.sleep( hold )
         self.ctx.send( self.ctx.keyboard, up )
 
     def _fire( self, source_name, rotation ):

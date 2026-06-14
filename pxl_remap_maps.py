@@ -1,84 +1,71 @@
 """
-ACTIONS can become a part of a ROTATION; ACTIONS are defined by properties:
+ACTIONS can become a part of a ROTATION; ACTIONS are defined by properties.
+
+`key` may be a keyboard key (e.g. "e") or a mouse button: "left", "right", "middle" (clicks at
+the current cursor position).
 """
 ACTIONS = {
-    # (2012, 1367) - (85, 64, 44)
-    "brutality": {
-        "key": "e",
-        "cooldown": 0,
-        "cast_time": 0.27,
-        "color_check": {
-            "px": 2012,
-            "py": 1367,
-            "color": (85, 64, 44)
-        },
-    },
-    # (2087, 1374) - (103, 85, 76)
     "deception": {
-        "key": "r",
+        "key": "left",
         "cooldown": 0,
-        "cast_time": 0.27,
+        "cast_time": 0.3,
         "color_check": {
-            "px": 2087,
-            "py": 1374,
-            "color": (103, 85, 76)
+            "px": 2082,
+            "py": 1276,
+            "color": (105, 84, 71)
         },
     },
-    # (2198, 1367) - (187, 121, 31)
-    "demise": {
-        "key": "f",
+    "brutality": {
+        "key": "right",
         "cooldown": 0,
-        "cast_time": 0.44,
-        "color_check": {
-            "px": 2198,
-            "py": 1367,
-            "color": (187, 121, 31)
-        },
-    },
-    # (2217, 1374) - (32, 103, 57)
-    "gas arrow": {
-        "key": "f",
-        "cooldown": 0,
-        "cast_time": 0,
+        "cast_time": 0.3,
         "color_check": {
             "px": 2217,
-            "py": 1374,
-            "color": (32, 103, 57)
+            "py": 1285,
+            "color": (85, 62, 42)
         },
     },
-    "volcano": {
+    "first_volcano": {
         "key": "q",
-        "cooldown": 8.49,
-        "cast_time": 0.49,
+        "cooldown": 5.4,
+        "cast_time": 0.65,
+        "color_check": {},
+    },
+    "second_volcano": {
+        "key": "q",
+        "cooldown": 5.4,
+        "cast_time": 0.65,
         "color_check": {},
     },
     "ele weakness": {
-        "key": "t",
-        "cooldown": 7.82,
-        "cast_time": 0.47,
+        "key": "e",
+        "cooldown": 12,
+        "cast_time": 0.6,
         "color_check": {},
     },
-    # (2069, 1368) - (234, 107, 42)
-    "ruz's brand": {
+    # (2074, 1399) - (113, 113, 101)
+    "pain offering": {
         "key": "r",
-        "cooldown": 0,
-        "cast_time": 0.29,
+        "cooldown": 6,
+        "cast_time": 0.6,
         "color_check": {
-            "px": 2069,
-            "py": 1368,
-            "color": (234, 107, 42)
+            "px": 2074,
+            "py": 1399,
+            "color": (113, 113, 101)
         },
-    },
+    }
 }
 
 # ROTATIONS are sequences of ACTIONS
 ROTATIONS = {
-    "quick": ["brutality"],
-    "main": ["ele weakness", "volcano", "brutality", "demise"]
+    "volcano": ["first_volcano", "second_volcano"],
+    "main": ["deception", "brutality"],
+    "boss": ["ele weakness", "pain offering"]
 }
 
 # REMAPS bind keys to ROTATIONS
 REMAPS = {
-    "m": "quick",
+    "m": "volcano",
     "l": "main",
+    "z": "boss",
 }
