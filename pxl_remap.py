@@ -194,7 +194,7 @@ class PxlRemapper:
 
     This class also owns the application's command hotkeys (formerly the keyboard-library KEYBINDS):
     F12 / ESC quit, and Ctrl+P reports the mouse color. These are intercepted (not forwarded) and
-    are not gated by winwatch.
+    are not gated by wincheck.
     """
 
     # Poll interval (ms) for await_input so the loop can observe the stop flag
@@ -204,16 +204,16 @@ class PxlRemapper:
     MIN_HOLD = 0.050
     MAX_HOLD = 0.075
 
-    def __init__( self, winwatch, actions, rotations, remaps, on_quit = None ):
+    def __init__( self, wincheck, actions, rotations, remaps, on_quit = None ):
         """
         Args:
-            winwatch (PxlWinWatch): gating; remaps apply only while winwatch.active is True.
+            wincheck (PxlWinCheck): gating; remaps apply only while wincheck.check() returns True.
             actions (dict): ACTIONS config { action_name: { key, cooldown, cast_time, color_check } }
             rotations (dict): ROTATIONS config { rotation_name: [ action_name, ... ] }
             remaps (dict): REMAPS config { source_key_name: rotation_name }
             on_quit (callable | None): invoked when the F12/ESC quit hotkey is pressed.
         """
-        self.winwatch = winwatch
+        self.wincheck = wincheck
         self.on_quit = on_quit
 
         # Character-global cast lock: while perf_counter() < _cast_until, a cast is in progress and
@@ -345,7 +345,7 @@ class PxlRemapper:
 
                 self.down[ scan_code ] = True
 
-                if not self.winwatch.active:
+                if not self.wincheck.check():
                     # Outside the target app: behave like the real key
                     self.ctx.send( device, stroke )
                     print( f"{CYAN}{source_name}{RESET} {YELLOW}inactive{RESET} -> passthrough" )

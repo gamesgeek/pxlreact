@@ -12,3 +12,7 @@ As currently designed `pxl_winwatch.py` is *constantly* monitoring the window ti
 Would you agree with this assessment? Instead of constantly updating the `active`, pxl_winwatch could expose a method that returns a boolean based on these checks and then it would only need to be called in response to key presses or pixel reactions, drastically reducing the performance overhead.
 
 If this is accurate, can you plan to implement `pxl_wincheck.py` which mirrors the behavior of `pxl_winwatch.py` in every way except instead of a constant polling process it implements a signular "check" method that returns true or false?
+
+Then find the uses of `pxl_winwatch` throughout the project and replace them with calls to this method instead of checks for the flag?
+
+⚠️ Do not blindly proceed with this plan if you DISAGREE with the assessment. If a "just in time" check might be less effective than the current polling approach, perhaps a different fix is in order that could help address the problems I'm seeing like reactions taking place immediately when the game's state changes.

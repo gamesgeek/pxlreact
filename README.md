@@ -19,9 +19,9 @@ The project intentionally avoids UI complexity and runs without a GUI. It focuse
   - Utilities for reading screen pixels, color comparison with tolerance, mouse position, and searching a region for the closest color.
   - Key helpers: `get_pixel_color`, `colors_different`, `get_mouse_pos`, `find_most_similar_pixel`.
 
-- `pxl_winwatch.py` (session gating)
-  - Maintains an `active` flag so reactions only fire in the intended context.
-  - Checks the foreground window title and validates a marker pixel’s color.
+- `pxl_wincheck.py` (session gating)
+  - Exposes an on-demand `check()` so reactions only fire in the intended context.
+  - Reads the foreground window title and validates a marker pixel’s color live at each call.
   - Defaults target to `Path of Exile 2` and a specific marker coordinate/color.
 
 - `pxl_intercept.py` (hardware-like key events)
@@ -71,7 +71,7 @@ python pxlreactHL.py
 ```
 
 - Press `F12` to exit cleanly.
-- Reactions only trigger when `pxl_winwatch.PxlWinWatch.active` is `True` (foreground window and marker color match).
+- Reactions only trigger when `pxl_wincheck.PxlWinCheck.check()` returns `True` (foreground window and marker color match).
 
 ---
 
@@ -90,7 +90,7 @@ Default behavior (example registry):
 
 ## Configuration
 
-- Session gating (window + marker): `pxl_winwatch.py`
+- Session gating (window + marker): `pxl_wincheck.py`
   - `target_app`, `marker_x`, `marker_y`, `marker_color`
 
 - Reactions and pixels: `pxlreactHL.py` and `PxlReactionRegistry`
@@ -126,7 +126,7 @@ Default behavior (example registry):
 ```
 c:\dev\pxlreact\
   pxlreactHL.py         # headless main app
-  pxl_winwatch.py       # session gating (window title + marker pixel)
+  pxl_wincheck.py       # session gating (window title + marker pixel)
   pxl_lib.py            # pixel/color utilities
   pxl_intercept.py      # interception-based keyboard events
   ansi.py               # simple ANSI color helpers for console output

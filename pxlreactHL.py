@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 import threading
 
-from pxl_winwatch import PxlWinWatch
+from pxl_wincheck import PxlWinCheck
 from pxl_intercept import PxlIntercept
 from pxl_remap import PxlRemapper
 
@@ -34,8 +34,8 @@ class PxlReactApp:
                 intervals may miss rapid changes
         """
 
-        # Window watch (replaces old 'check_session' method with its 'active' flag)
-        self.winwatch = PxlWinWatch()
+        # On-demand window/marker gate; check() is evaluated live at each reaction/remap fire point
+        self.wincheck = PxlWinCheck()
 
         self.PI = PxlIntercept()
 
@@ -43,7 +43,7 @@ class PxlReactApp:
 
         # Keyboard-capture remapping layer (starts its own background thread); also owns the
         # F12/ESC quit and Ctrl+P report-color command hotkeys
-        self.remapper = PxlRemapper( self.winwatch, ACTIONS, ROTATIONS, REMAPS, on_quit = self.exit_application )
+        self.remapper = PxlRemapper( self.wincheck, ACTIONS, ROTATIONS, REMAPS, on_quit = self.exit_application )
 
         self.pixel_count = 2
         self.tick_interval = 0.025
@@ -68,7 +68,7 @@ class PxlReactApp:
         """
         try:
             while not self.stop_event.is_set():
-                if self.winwatch.active:
+                if self.wincheck.check():
                     for pxl in self.pixels[ 1: ]:
                         if pxl is None:
                             continue
@@ -257,7 +257,7 @@ class PxlReaction:
         """
 
         # Trigger only when we're ready and our parent app session is active (in the right window, etc.)
-        if self.state != "ready" or not self.pxl.app.winwatch.active:
+        if self.state != "ready" or not self.pxl.app.wincheck.check():
             return False
 
         return colors_different( self.pxl.rgb, self.reaction_color )
