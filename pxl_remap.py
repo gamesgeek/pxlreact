@@ -21,7 +21,7 @@ from pyinterception.src.interception.strokes import KeyStroke, MouseStroke
 from pyinterception.src.interception._keycodes import get_key_information
 
 from pxl_keys import DEVICES
-from pxl_lib import get_pixel_color, colors_similar, PixelMonitor
+from pxl_lib import ColorCondition, PixelMonitor, CastLock
 from ansi import *
 
 # Substitute values for Action.key that send a mouse click at the current cursor position
@@ -70,8 +70,8 @@ def _detect_mouse_index():
 class Action:
     """
     A single game action: a substitute to send (keyboard key or mouse button), gated by an optional
-    cooldown and an optional pixel-color check, with an optional cast time during which other
-    actions must not interrupt it.
+    cooldown and zero or more pixel-color conditions (all of which must hold), with an optional cast
+    time during which other actions must not interrupt it.
 
     For `key`, use a keyboard key name (e.g. "e") or a mouse button: "left", "right", or "middle".
     Mouse substitutes click at the current cursor position without moving the pointer.
@@ -82,11 +82,9 @@ class Action:
     cooldown: float = 0.0
     cast_time: float = 0.0
 
-    # Color gate; color is None means "no color check" (normalized at build time from a missing or
-    # empty color_check). Keeping it None lets color_ready short-circuit with a cheap identity test.
-    px: int = None
-    py: int = None
-    color: tuple = None
+    # Color gate: a list of ColorCondition that must ALL hold (logical AND) for the action to fire.
+    # An empty list means "no color check"; color_ready short-circuits to True.
+    color_checks: list = field( default_factory = list )
 
     # Last fire time (perf_counter); negative means never fired
     last: float = field( default = -1.0, init = False )
@@ -95,10 +93,7 @@ class Action:
         return self.last < 0 or ( time.perf_counter() - self.last ) >= self.cooldown
 
     def color_ready( self ):
-        if self.color is None:
-            return True
-        observed = get_pixel_color( self.px, self.py )
-        return observed is not None and colors_similar( observed, self.color )
+        return all( cond.passes() for cond in self.color_checks )
 
     def ready( self ):
         return self.cooldown_ready() and self.color_ready()
@@ -114,11 +109,11 @@ class Action:
             remaining = 0.0
         cd = f"{GREEN}rdy{RESET}" if remaining == 0.0 else f"{YELLOW}{remaining:.2f}s{RESET}"
 
-        if self.color is None:
+        # One glyph per condition keeps multi-check actions compact in the terminal
+        if not self.color_checks:
             color_part = " "
         else:
-            ok = self.color_ready()
-            color_part = f"{GREEN}+{RESET}" if ok else f"{RED}-{RESET}"
+            color_part = "".join( cond.describe() for cond in self.color_checks )
 
         return f"{CYAN}{self.name}{RESET} ({MAGENTA}{self.key}{RESET})[{cd}{color_part}]"
 
@@ -139,14 +134,39 @@ class Rotation:
         return None
 
 
+def _build_color_checks( color_check ):
+    """
+    Normalize a `color_check` config into a list of ColorCondition (all ANDed at resolve time).
+
+    Accepts either a single condition dict { px, py, color, match? } or a list of such dicts. A
+    missing/empty/None value yields an empty list (no color gate). Each condition's `match` defaults
+    to True ("pixel must be this color"); set match = False for "pixel must NOT be this color".
+    """
+    if not color_check:
+        return []
+    conditions = color_check if isinstance( color_check, list ) else [ color_check ]
+    out = []
+    for cc in conditions:
+        if not cc:
+            continue
+        out.append(
+            ColorCondition(
+                px = cc[ 'px' ],
+                py = cc[ 'py' ],
+                color = cc[ 'color' ],
+                match = cc.get( 'match', True ),
+            )
+        )
+    return out
+
+
 def build_actions( actions_cfg ):
     """
     Build a name -> Action map from an ACTIONS config dict. A missing or empty `color_check` is
-    normalized to no color gate (color stays None).
+    normalized to no color gate (empty condition list).
     """
     out = {}
     for name, c in actions_cfg.items():
-        cc = c.get( 'color_check' ) or {}
         key = c[ 'key' ]
         if key.lower() in MOUSE_BUTTONS:
             key = key.lower()
@@ -155,9 +175,7 @@ def build_actions( actions_cfg ):
             key = key,
             cooldown = c.get( 'cooldown', 0.0 ),
             cast_time = c.get( 'cast_time', 0.0 ),
-            px = cc.get( 'px' ),
-            py = cc.get( 'py' ),
-            color = cc.get( 'color' ),
+            color_checks = _build_color_checks( c.get( 'color_check' ) ),
         )
     return out
 
@@ -204,7 +222,7 @@ class PxlRemapper:
     MIN_HOLD = 0.050
     MAX_HOLD = 0.075
 
-    def __init__( self, wincheck, actions, rotations, remaps, on_quit = None ):
+    def __init__( self, wincheck, actions, rotations, remaps, on_quit = None, cast_lock = None ):
         """
         Args:
             wincheck (PxlWinCheck): gating; remaps apply only while wincheck.check() returns True.
@@ -212,13 +230,16 @@ class PxlRemapper:
             rotations (dict): ROTATIONS config { rotation_name: [ action_name, ... ] }
             remaps (dict): REMAPS config { source_key_name: rotation_name }
             on_quit (callable | None): invoked when the F12/ESC quit hotkey is pressed.
+            cast_lock (CastLock | None): shared cast gate; while active, remap presses are dropped so
+                they cannot interrupt a cast. Reactions arm the same lock, so a cast-time reaction is
+                protected from remapped keypresses. A private lock is created if none is supplied.
         """
         self.wincheck = wincheck
         self.on_quit = on_quit
 
-        # Character-global cast lock: while perf_counter() < _cast_until, a cast is in progress and
-        # remap presses are dropped so the cast is not interrupted.
-        self._cast_until = 0.0
+        # Shared cast lock: while active(), a cast is in progress and remap presses are dropped so
+        # the cast is not interrupted (armed by remap actions with cast_time and by reactions).
+        self.cast_lock = cast_lock if cast_lock is not None else CastLock()
 
         self.ctx = pyint.Interception()
         self.ctx.set_filter( self.ctx.is_keyboard, FilterKeyFlag.FILTER_KEY_ALL )
@@ -351,11 +372,11 @@ class PxlRemapper:
                     print( f"{CYAN}{source_name}{RESET} {YELLOW}inactive{RESET} -> passthrough" )
                     continue
 
-                if time.perf_counter() < self._cast_until:
+                if self.cast_lock.active():
                     # A cast is in progress; drop this press so the cast is not interrupted.
                     # FUTURE: to queue instead of dropping, buffer ( source_name, rotation ) here
                     # and flush at cast-end by shrinking the await_input timeout to wake the loop
-                    # when _cast_until elapses, then resolve/fire each buffered press in order.
+                    # when the cast elapses, then resolve/fire each buffered press in order.
                     print( f"{CYAN}{source_name}{RESET} {YELLOW}casting{RESET} -> dropped" )
                     continue
 
@@ -452,6 +473,6 @@ class PxlRemapper:
         action.fire()
 
         if action.cast_time > 0:
-            self._cast_until = time.perf_counter() + action.cast_time
+            self.cast_lock.arm( action.cast_time )
 
         print( f"{BLUE}🖮 got {RED}{source_name}{RESET} | {states} | {BLUE}🖮 sent {RED}{action.key}{RESET}" )

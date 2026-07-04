@@ -16,3 +16,11 @@ B_CYAN = "\033[1;96m"
 B_WHITE = "\033[1;97m"
 RE = "\033[0m"
 RESET = "\033[0m"
+
+def fg_rgb( r, g, b ):
+    """24-bit truecolor foreground escape for an (r, g, b) color."""
+    return f"\033[38;2;{r};{g};{b}m"
+
+def bg_rgb( r, g, b ):
+    """24-bit truecolor background escape for an (r, g, b) color."""
+    return f"\033[48;2;{r};{g};{b}m"

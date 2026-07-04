@@ -3,6 +3,7 @@ pxl_lib.py provides various utility functions for use throughout PxlReact; these
 a home in their own class.
 """
 
+import colorsys
 import ctypes
 import threading
 import time
@@ -101,6 +102,76 @@ def colors_similar( c1, c2 ):
     """
     return not colors_different( c1, c2 )
 
+class CastLock:
+    """
+    Shared "a cast is in progress" gate, coordinating the reaction system and the keyboard remapper.
+
+    When armed for a duration, `active()` returns True until it elapses. The remapper drops injected
+    remap presses while active so they cannot interrupt a cast; reactions (and remap actions with a
+    cast_time) arm it when they fire. Thread-safe: armed from the reaction poll thread and read from
+    the remapper thread. Arming never shortens an already-longer active cast.
+    """
+
+    def __init__( self ):
+        self._until = 0.0
+        self._lock = threading.Lock()
+
+    def arm( self, duration ):
+        with self._lock:
+            self._until = max( self._until, time.perf_counter() + duration )
+
+    def active( self ):
+        with self._lock:
+            return time.perf_counter() < self._until
+
+
+def matches_any( color, palette ):
+    """
+    True when `color` is similar (within COLOR_TOLERANCE) to any color in `palette`.
+
+    Used as a cheap allow-list test against an already-read pixel color; an empty or None palette
+    yields False. Each comparison is a few integer ops, so testing a small palette every poll tick
+    is negligible next to the GetPixel read that produced `color`.
+    """
+    if not palette:
+        return False
+    return any( colors_similar( color, ref ) for ref in palette )
+
+
+class ColorCondition:
+    """
+    A single pixel-color condition: the pixel at (px, py) must either match `color` (match = True)
+    or differ from it (match = False). `passes()` reads the pixel live and applies the test.
+
+    Used to compose multi-layered checks where several conditions must all hold (logical AND).
+    """
+
+    __slots__ = ( 'px', 'py', 'color', 'match' )
+
+    def __init__( self, px, py, color, match = True ):
+        self.px = px
+        self.py = py
+        self.color = color
+        self.match = match
+
+    def passes( self ):
+        """
+        Read the configured pixel and return whether the condition holds. A failed read (None)
+        fails the condition, since we cannot confirm the required state.
+        """
+        observed = get_pixel_color( self.px, self.py )
+        if observed is None:
+            return False
+        if self.match:
+            return colors_similar( observed, self.color )
+        return colors_different( observed, self.color )
+
+    def describe( self ):
+        """Short '+'/'-' status glyph for terminal logging (matched expectation -> green '+')."""
+        ok = self.passes()
+        glyph = '+' if self.match else '!'
+        return f"{GREEN}{glyph}{RESET}" if ok else f"{RED}{glyph}{RESET}"
+
 def get_mouse_pos_window():
     """
     Get the current position of the mouse cursor in window-relative space.
@@ -152,6 +223,42 @@ def validate_color_at( x, y, color ):
 def rgb_to_hex( rgb ):
     """Convert an RGB tuple to a hexadecimal color."""
     return "#{:02x}{:02x}{:02x}".format( *rgb )
+
+def color_name( rgb ):
+    """
+    Rough human hue label for an RGB color (e.g. "green", "purple"), to make the in-game association
+    obvious in logs - a green tint reads as poison, a purple tint as a curse, etc. Low-saturation or
+    very dark/light colors collapse to grey/black/white.
+    """
+    r, g, b = ( c / 255.0 for c in rgb )
+    h, s, v = colorsys.rgb_to_hsv( r, g, b )
+
+    if v < 0.12:
+        return "black"
+    if s < 0.12:
+        return "white" if v > 0.75 else "grey"
+
+    deg = h * 360.0
+    for limit, name in ( ( 15, "red" ), ( 45, "orange" ), ( 70, "yellow" ), ( 170, "green" ),
+                         ( 200, "cyan" ), ( 260, "blue" ), ( 320, "purple" ), ( 360, "red" ) ):
+        if deg < limit:
+            return name
+    return "red"
+
+def color_swatch( rgb, width = 2 ):
+    """Return a small block colored with `rgb` as its terminal background (truecolor)."""
+    r, g, b = rgb
+    return f"{bg_rgb( r, g, b )}{' ' * width}{RESET}"
+
+def describe_color( rgb ):
+    """
+    One-line visual + textual description of a color: a truecolor swatch, the hue name, the RGB
+    triple, and the hex code. Used by reporting to make logged colors recognizable at a glance.
+    """
+    r, g, b = rgb
+    return ( f"{color_swatch( rgb )} {color_name( rgb ):>6} "
+             f"({MAGENTA}{r:>3}{RESET}, {MAGENTA}{g:>3}{RESET}, {MAGENTA}{b:>3}{RESET}) "
+             f"{CYAN}{rgb_to_hex( rgb )}{RESET}" )
 
 def find_most_similar_pixel( color, mnx, mny, mxx, mxy ):
     """
