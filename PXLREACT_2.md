@@ -53,10 +53,15 @@ AI should assist with a full review of the project to look for opportunities to 
 AI should also evaluate algorithms and determine whether there are more performant or concise ways to achieve the same outcomes (i.e., using more performant structures for frequently accessed data).
 Many `pxlreact` methods were written 2-3 years ago when LLMs and associated tools were far less sophisticated, so they may have made mistakes or followed inconsistent or outdated design methods.
 
+### Opportunity #4: Rules & Documentation
+
+
+
 ## Considerations
 When planning the phases of the transition, include the following additional considerations:
 
 - `pyinterception` and the underlying hardware intercept driver are third party utilities and user is unfamiliar with them; do not "touch" the project at that layer, and be extremely careful with the adjacent layers such as the hardware configuration in `pxl_intercept.py` (do look for optimizations or logical improvements here)
+
 - Do not invest any effort or design any substantial features in the interest of backward compability, `pxlreact` is a single user project and if `pxlreact2` is successful I will no longer be using it in the current state
 
 
