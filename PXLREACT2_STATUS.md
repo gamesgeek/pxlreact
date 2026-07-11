@@ -40,7 +40,9 @@ Remaining before the Phase 0 gate:
 Behaviors not captured in code comments that a refactor must preserve (timing feel, debounce quirks,
 tolerance values tuned by trial and error). *To be filled in by the user before Phase 1 begins.*
 
-- (none recorded yet)
+- Hand-tuned tolerance values were arrived at by trial and error, but this should be retired in `pxlreact2` in favor of more dynamic settings associated with each color-driven trigger; a global default value can be set, but each individual reaction or ability-readiness check should be tunable, including those associated with the "wincheck" status monitor component
+
+- Input timing, debounce, etc. feels fine; no quirks or nuances
 
 ## Decision Log
 - **In-place evolution** in this repo (no greenfield package or new repo).
