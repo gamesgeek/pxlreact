@@ -631,10 +631,10 @@ class PxlReactionRegistry:
     # CV1 readiness: fire only when BOTH a 6 s minimum cooldown has elapsed AND the skill's icon
     # shows it is available (the cooldown is variable, so the color guards true availability while
     # the 6 s floor prevents rapid re-triggering).
-    # (2153, 1384) - (71, 204, 237)
+    # (2149, 1363) - (108, 178, 197)
     cv_ready_check = [
         { 'type': 'cooldown', 'cooldown': 6 },
-        { 'type': 'color', 'px': 2153, 'py': 1384, 'color': (71, 204, 237) },
+        { 'type': 'color', 'px': 2149, 'py': 1363, 'color': (108, 178, 197) },
     ]
 
     # HP is now Energy Shield for my Build
@@ -648,7 +648,7 @@ class PxlReactionRegistry:
     hp_ignore_colors = []
 
     # (2418, 1357) - (14, 47, 100)
-    mp_reaction_color = (14, 47, 100)
+    mp_reaction_color = (14, 50, 105)
 
     # How long our flasks take to recharge (don't try to use them more often than this)
     hp_cooldown = 5
@@ -728,9 +728,10 @@ class PxlReactionRegistry:
                 'ignore_colors': self.hp_ignore_colors,
                 'reaction': self.react_HP
             },
+            # (2415, 1356) - (14, 50, 105)
             'MP1': {
-                'sx': 2418,
-                'sy': 1357,
+                'sx': 2415,
+                'sy': 1356,
                 'type': 'react_if_not_color',
                 'reaction_color': self.mp_reaction_color,
                 'cooldown': self.mp_cooldown,
