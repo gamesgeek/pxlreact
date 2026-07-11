@@ -1,0 +1,12 @@
+# pxlreact runtime dependencies (Python 3.12, Windows)
+# Install into the project venv: .pxlenv\Scripts\Activate.ps1; pip install -r requirements.txt
+#
+# Note: pyinterception is a local clone in ./pyinterception (imported as
+# pyinterception.src.interception) and is NOT installed via pip. It also requires
+# the Interception hardware driver to be installed on the system.
+#
+# The `keyboard` package mentioned in the README is no longer imported by
+# first-party code and is intentionally omitted.
+
+pywin32==311
+mss==10.2.0

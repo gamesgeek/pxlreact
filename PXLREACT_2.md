@@ -54,7 +54,9 @@ AI should also evaluate algorithms and determine whether there are more performa
 Many `pxlreact` methods were written 2-3 years ago when LLMs and associated tools were far less sophisticated, so they may have made mistakes or followed inconsistent or outdated design methods.
 
 ### Opportunity #4: Rules & Documentation
+The final stage of `pxlreact2` transition should be a full review of Cursor project rules and `README.md` documentation.
 
+Rules should be updated to reflect the changes made during the transition and to retire any that appear to be out of date or to refer to functionality that is no longer present or supported.
 
 
 ## Considerations
@@ -63,6 +65,8 @@ When planning the phases of the transition, include the following additional con
 - `pyinterception` and the underlying hardware intercept driver are third party utilities and user is unfamiliar with them; do not "touch" the project at that layer, and be extremely careful with the adjacent layers such as the hardware configuration in `pxl_intercept.py` (do look for optimizations or logical improvements here)
 
 - Do not invest any effort or design any substantial features in the interest of backward compability, `pxlreact` is a single user project and if `pxlreact2` is successful I will no longer be using it in the current state
+
+- Beware of legacy content and do not make assumptions based on the suggestion of existing decisions related to for example GUI libraries; `pxlreact` has experimetned in the past with different approaches to a GUI so there might be some notes or comments (or rules) that talk about `tkinter` or similar.
 
 
 
