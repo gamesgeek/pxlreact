@@ -20,7 +20,7 @@ from pyinterception.src.interception.constants import KeyFlag, FilterKeyFlag, Mo
 from pyinterception.src.interception.strokes import KeyStroke, MouseStroke
 from pyinterception.src.interception._keycodes import get_key_information
 
-from pxl_keys import DEVICES
+from pxl_config import get_settings
 from pxl_lib import ColorCondition, PixelMonitor, CastLock
 from ansi import *
 
@@ -28,31 +28,11 @@ from ansi import *
 MOUSE_BUTTONS = frozenset( ( 'left', 'right', 'middle' ) )
 
 
-def _detect_keyboard_index():
+def _detect_device_index( my_hwid ):
     """
-    Find the interception device index matching our configured keyboard HWID. Returns the index, or
-    None if no match is found (callers should fall back to the context default).
+    Find the interception device index whose HWID contains `my_hwid`. Returns the index, or None if
+    no match is found (callers should fall back to the context default).
     """
-    my_hwid = DEVICES[ 'keyboard' ][ 'handle' ]
-    probe = pyint.Interception()
-    try:
-        idx = 0
-        for device in probe.devices:
-            hwid = device.get_HWID()
-            if hwid is not None and my_hwid in hwid:
-                return idx
-            idx += 1
-    finally:
-        probe.destroy()
-    return None
-
-
-def _detect_mouse_index():
-    """
-    Find the interception device index matching our configured mouse HWID. Returns the index, or
-    None if no match is found (callers should fall back to the context default).
-    """
-    my_hwid = DEVICES[ 'mouse' ][ 'handle' ]
     probe = pyint.Interception()
     try:
         idx = 0
@@ -154,6 +134,7 @@ def _build_color_checks( color_check ):
                 px = cc[ 'px' ],
                 py = cc[ 'py' ],
                 color = cc[ 'color' ],
+                tolerance = cc[ 'tolerance' ],
                 match = cc.get( 'match', True ),
             )
         )
@@ -215,13 +196,6 @@ class PxlRemapper:
     are not gated by wincheck.
     """
 
-    # Poll interval (ms) for await_input so the loop can observe the stop flag
-    AWAIT_TIMEOUT_MS = 500
-
-    # Humanized hold (seconds) for an injected substitute key, mirroring PxlIntercept press delays
-    MIN_HOLD = 0.050
-    MAX_HOLD = 0.075
-
     def __init__( self, wincheck, actions, rotations, remaps, on_quit = None, cast_lock = None ):
         """
         Args:
@@ -237,6 +211,15 @@ class PxlRemapper:
         self.wincheck = wincheck
         self.on_quit = on_quit
 
+        settings = get_settings()
+
+        # Poll interval (ms) for await_input so the loop can observe the stop flag
+        self.AWAIT_TIMEOUT_MS = settings[ 'remapper' ][ 'await_timeout_ms' ]
+
+        # Humanized hold (seconds) for an injected substitute key, mirroring PxlIntercept press delays
+        self.MIN_HOLD = settings[ 'remapper' ][ 'min_hold' ]
+        self.MAX_HOLD = settings[ 'remapper' ][ 'max_hold' ]
+
         # Shared cast lock: while active(), a cast is in progress and remap presses are dropped so
         # the cast is not interrupted (armed by remap actions with cast_time and by reactions).
         self.cast_lock = cast_lock if cast_lock is not None else CastLock()
@@ -244,7 +227,7 @@ class PxlRemapper:
         self.ctx = pyint.Interception()
         self.ctx.set_filter( self.ctx.is_keyboard, FilterKeyFlag.FILTER_KEY_ALL )
 
-        idx = _detect_keyboard_index()
+        idx = _detect_device_index( settings[ 'devices' ][ 'keyboard_hwid' ] )
         if idx is not None:
             self.ctx.keyboard = idx
             print( f"ℹ️ {GREEN}PxlRemapper{RESET}: capturing keyboard device {MAGENTA}{idx}{RESET}" )
@@ -252,7 +235,7 @@ class PxlRemapper:
             print( f"⚠️ {YELLOW}PxlRemapper: keyboard HWID not matched; using default device "
                    f"{MAGENTA}{self.ctx.keyboard}{RESET}" )
 
-        midx = _detect_mouse_index()
+        midx = _detect_device_index( settings[ 'devices' ][ 'mouse_hwid' ] )
         if midx is not None:
             self.ctx.mouse = midx
             print( f"ℹ️ {GREEN}PxlRemapper{RESET}: mouse device {MAGENTA}{midx}{RESET}" )

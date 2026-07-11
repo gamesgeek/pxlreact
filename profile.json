@@ -1,0 +1,146 @@
+{
+  "wincheck": {
+    "target_window": "Path of Exile 2",
+    "markers": [
+      { "x": 22, "y": 1074, "color": [169, 167, 144], "tolerance": 0 }
+    ]
+  },
+  "reactions": {
+    "HP1": {
+      "enabled": false,
+      "x": 83,
+      "y": 1223,
+      "type": "react_if_not_color",
+      "color": [74, 114, 126],
+      "tolerance": 4000,
+      "confirm": 0.1,
+      "cooldown": 5,
+      "ignore_colors": [],
+      "press": "F",
+      "glyph": "+\u2764\ufe0f+"
+    },
+    "MP1": {
+      "enabled": true,
+      "x": 2415,
+      "y": 1356,
+      "type": "react_if_not_color",
+      "color": [14, 50, 105],
+      "tolerance": 4000,
+      "confirm": 0.1,
+      "cooldown": 3,
+      "press": "2",
+      "glyph": "*\u2728*"
+    },
+    "CV1": {
+      "enabled": true,
+      "x": 166,
+      "y": 1235,
+      "type": "react_if_not_color",
+      "color": [136, 192, 204],
+      "tolerance": 4000,
+      "confirm": 0.1,
+      "ready": [
+        { "type": "cooldown", "cooldown": 6 },
+        { "type": "color", "px": 2149, "py": 1363, "color": [108, 178, 197], "tolerance": 4000 }
+      ],
+      "ignore_colors": [
+        [186, 140, 207]
+      ],
+      "cast_time": 0.4,
+      "press": "T",
+      "glyph": "~\ud83e\uddff~"
+    }
+  },
+  "actions": {
+    "death storm": {
+      "key": "middle",
+      "cooldown": 3,
+      "cast_time": 1.5,
+      "color_check": [
+        { "px": 2138, "py": 1277, "color": [160, 187, 250], "tolerance": 4000 }
+      ]
+    },
+    "ruzhan's trap": {
+      "key": "q",
+      "cooldown": 4.04,
+      "cast_time": 0.28,
+      "color_check": [
+        { "px": 1938, "py": 1368, "color": [241, 79, 40], "tolerance": 4000 }
+      ]
+    },
+    "ruzhan's reckoning": {
+      "key": "q",
+      "cooldown": 5,
+      "cast_time": 0.28,
+      "color_check": [
+        { "px": 1945, "py": 1371, "color": [184, 165, 133], "tolerance": 4000 }
+      ]
+    },
+    "deception1": {
+      "key": "left",
+      "cooldown": 1.2,
+      "cast_time": 0.28,
+      "color_check": [
+        { "px": 2082, "py": 1276, "color": [105, 84, 71], "tolerance": 4000 }
+      ]
+    },
+    "deception2": {
+      "key": "left",
+      "cooldown": 1.2,
+      "cast_time": 0.28,
+      "color_check": [
+        { "px": 2082, "py": 1276, "color": [105, 84, 71], "tolerance": 4000 }
+      ]
+    },
+    "brutality": {
+      "key": "right",
+      "cooldown": 0,
+      "cast_time": 0.28,
+      "color_check": [
+        { "px": 2217, "py": 1285, "color": [85, 62, 42], "tolerance": 4000 }
+      ]
+    },
+    "unholy might": {
+      "key": "right",
+      "cooldown": 15,
+      "cast_time": 0.28,
+      "color_check": [
+        { "px": 2217, "py": 1285, "color": [85, 62, 42], "tolerance": 4000 }
+      ]
+    },
+    "ele weakness": {
+      "key": "e",
+      "cooldown": 12,
+      "cast_time": 0.65,
+      "color_check": []
+    },
+    "despair1": {
+      "key": "e",
+      "cooldown": 8,
+      "cast_time": 0.5,
+      "color_check": []
+    },
+    "despair2": {
+      "key": "e",
+      "cooldown": 8,
+      "cast_time": 0.5,
+      "color_check": []
+    },
+    "pain offering": {
+      "key": "r",
+      "cooldown": 8,
+      "cast_time": 0.6,
+      "color_check": [
+        { "px": 2074, "py": 1399, "color": [113, 113, 101], "tolerance": 4000 }
+      ]
+    }
+  },
+  "rotations": {
+    "main": ["unholy might", "ruzhan's trap", "deception1", "deception2", "brutality"],
+    "boss": ["despair1", "pain offering", "despair2"]
+  },
+  "remaps": {
+    "l": "main",
+    "z": "boss"
+  }
+}

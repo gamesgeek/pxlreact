@@ -1,31 +1,35 @@
 """
-PxlWinCheck is a single-purpose class designed to answer, on demand, whether the project should be acting: the correct application is in the foreground and a marker pixel is the expected color.
+PxlWinCheck is a single-purpose class designed to answer, on demand, whether the project should be
+acting: the correct application is in the foreground and every marker pixel is its expected color.
 
-Unlike the former polling design, this performs no background work and holds no cached flag; each call to check() reads the live window title and marker pixel so the result reflects the screen at the instant of the call (e.g. a key press or pixel reaction), avoiding stale-flag false triggers during state transitions such as loading screens.
+This performs no background work and holds no cached flag; each call to check() reads the live
+window title and marker pixels so the result reflects the screen at the instant of the call (e.g. a
+key press or pixel reaction), avoiding stale-flag false triggers during state transitions such as
+loading screens.
 """
 
 import win32gui
-from pxl_lib import validate_color_at
+from pxl_lib import ColorCondition
 from ansi import *
 
 
 class PxlWinCheck:
 
-    def __init__( self ):
-
-        # The application we're monitoring; must be the active window
-        self.target_app = 'Path of Exile 2'
-
+    def __init__( self, config ):
         """
-        The location and color of a key "indicator pixel" that shows us we're in the right state for pxlreact to operate; this is a precise check (validate_color_at) deliberately, as protecting against inadvertant reactions is key.
+        Args:
+            config (dict): normalized `wincheck` profile section: `target_window` plus a `markers`
+                list of { x, y, color, tolerance }. Markers guard against inadvertent reactions, so
+                their tolerance defaults to 0 (exact match) at load time; all must pass (AND).
         """
-        #(22, 1074) - (169, 167, 144)
-        self.marker_x = 22
-        self.marker_y = 1074
-        self.marker_color = ( 169, 167, 144 )
+        self.target_app = config[ 'target_window' ]
+        self.markers = [
+            ColorCondition( m[ 'x' ], m[ 'y' ], m[ 'color' ], m[ 'tolerance' ] )
+            for m in config[ 'markers' ]
+        ]
 
     def marker_ok( self ):
-        return validate_color_at( self.marker_x, self.marker_y, self.marker_color )
+        return all( marker.passes() for marker in self.markers )
 
     def in_target_app( self ):
         return self.target_app == win32gui.GetWindowText( win32gui.GetForegroundWindow() )

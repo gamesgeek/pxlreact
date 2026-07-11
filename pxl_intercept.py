@@ -6,19 +6,14 @@ from concurrent.futures import ThreadPoolExecutor
 
 from ansi import *
 
-# Hardware Device IDs
-from pxl_keys import DEVICES
-
-# Import maps for key names and codes e.g., KEY_CODES[ 'esc' ] = 0x1 and KEY_NAMES[ 0x1 ] = 'esc'
-# These codes/names are customized for our hardware pulled directly from monitoring software
-from pxl_keys import KEY_CODES, KEY_NAMES
+from pxl_config import get_settings
 
 # Using local pyinterception files for better control and stability
 import pyinterception.src.interception as pyint
 pi = pyint.Interception()
 
 # Find our keyboard within the devices list
-my_hwid = DEVICES['keyboard']['handle']
+my_hwid = get_settings()[ 'devices' ][ 'keyboard_hwid' ]
 
 idx = 0
 for device in pi.devices:
@@ -41,14 +36,8 @@ class PxlIntercept:
 
     def __init__( self ):
 
-        self.pi_cfg = {
-            'max_workers': 5,
-            'min_press_delay': 50,
-            'max_press_delay': 75,
-            'min_reaction_time': 115,
-            'max_reaction_time': 288,
-            'precompute_size': 10000,
-        }
+        # Injection thread pool size and humanized delay ranges (ms), from settings.toml
+        self.pi_cfg = get_settings()[ 'intercept' ]
 
         mxw = self.pi_cfg[ 'max_workers' ]
         self.tpexec = ThreadPoolExecutor( max_workers = mxw, thread_name_prefix = 'PxlIntercept' )

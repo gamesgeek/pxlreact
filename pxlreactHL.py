@@ -19,7 +19,7 @@ from pxl_remap import PxlRemapper
 from pxl_lib import *
 from ansi import *
 
-from pxl_remap_maps import ACTIONS, ROTATIONS, REMAPS
+from pxl_config import get_settings, load_profile
 
 class PxlReactApp:
     """
@@ -29,14 +29,14 @@ class PxlReactApp:
 
     def __init__( self ):
         """
-        Args:
-            pixel_count (int): Maximum number of pixels we will monitor
-            tick_interval (float): How often (in seconds) to poll for pixel color changes; longer
-                intervals may miss rapid changes
+        Load configuration (settings.toml + profile.json), wire up the subsystems, and create one
+        monitored pixel per enabled profile reaction.
         """
+        self.settings = get_settings()
+        self.profile = load_profile()
 
         # On-demand window/marker gate; check() is evaluated live at each reaction/remap fire point
-        self.wincheck = PxlWinCheck()
+        self.wincheck = PxlWinCheck( self.profile[ 'wincheck' ] )
 
         self.PI = PxlIntercept()
 
@@ -48,25 +48,21 @@ class PxlReactApp:
 
         # Keyboard-capture remapping layer (starts its own background thread); also owns the
         # F12/ESC quit and Ctrl+P report-color command hotkeys
-        self.remapper = PxlRemapper( self.wincheck, ACTIONS, ROTATIONS, REMAPS,
+        self.remapper = PxlRemapper( self.wincheck,
+                                     self.profile[ 'actions' ],
+                                     self.profile[ 'rotations' ],
+                                     self.profile[ 'remaps' ],
                                      on_quit = self.exit_application, cast_lock = self.cast_lock )
 
-        self.pixel_count = 3
-        self.tick_interval = 0.025
-
-        # Initialize the list; index 0 is unused in lite (no mouse preview)
-        self.pixels = [ None ] * ( self.pixel_count + 1 )
-
-        # Add regular pixels starting at index 1; assign arbitrary initial pixel coordinates and
-        # pass a reference to ourselves so Pxl's can remember us
-        for i in range( 1, self.pixel_count + 1 ):
-            self.pixels[ i ] = Pxl( i, i * 11, i * 11, app = self )
+        self.tick_interval = self.settings[ 'app' ][ 'tick_interval' ]
 
         self.registry = PxlReactionRegistry( self )
 
-        # self.load_reaction( 1, "HP1" )
-        self.load_reaction( 1, "MP1" )
-        self.load_reaction( 2, "CV1" )
+        # One monitored pixel per enabled reaction; no fixed slot count
+        self.pixels = []
+        for name, data in self.profile[ 'reactions' ].items():
+            if data[ 'enabled' ]:
+                self.load_reaction( name )
 
     def start_update_loop( self ):
         """
@@ -78,9 +74,7 @@ class PxlReactApp:
                 # loading screen) clear pending streaks so a confirmation can't carry across the
                 # gap and fire the instant the context returns.
                 active = self.wincheck.check()
-                for pxl in self.pixels[ 1: ]:
-                    if pxl is None:
-                        continue
+                for pxl in self.pixels:
                     if active:
                         pxl.update_color()
                     elif pxl.reaction is not None:
@@ -93,52 +87,21 @@ class PxlReactApp:
         finally:
             self.cleanup()
 
-    def reassign_pixel( self, index, x = None, y = None ):
+    def load_reaction( self, reaction_name ):
         """
-        For simplicity; pixels are pre-assigned a default position at load, so all assignments are really re-assignments;
-        x, y are set based on the mouse position, but can be supplied directly to facilitate loading configurations from
-        file.
+        Create a monitored pixel for `reaction_name` at its registry coordinates and attach the
+        reaction built by the registry's factory (plain by default; capture mode swaps the factory
+        once at startup, so this construction site needs no capture branching).
         """
+        reaction_data = self.registry.reactions_registry[ reaction_name ]
 
-        pxl = self.pixels[ index ]
-
-        if x is None or y is None:
-            x, y = get_mouse_pos()
-
-        pxl.sx = x
-        pxl.sy = y
-
-        pxl.update_color()
-
-    def load_reaction( self, pixel_index, reaction_name ):
-        """
-        Load a reaction from the registry and assign it to a specific pixel,
-        including reassigning the pixel to the coordinates from the registry.
-
-        Args:
-            pixel_index (int): The index of the pixel to assign the reaction.
-            reaction_name (str): The name of the reaction in the registry.
-        """
-
-        # Get the reaction definition
-        reaction_data = self.registry.reactions_registry.get( reaction_name )
-
-        if not reaction_data:
-            raise ValueError( f"Reaction '{reaction_name}' not found in registry" )
-
-        # Reassign the pixel to monitor the sx, sy coordinates from the reaction definition
-        self.reassign_pixel( pixel_index, x = reaction_data[ 'sx' ], y = reaction_data[ 'sy' ] )
-
-        # Build the reaction via the registry's factory (plain by default; capture mode swaps the
-        # factory once at startup, so this construction site needs no capture branching).
-        pixel = self.pixels[ pixel_index ]
+        pixel = Pxl( len( self.pixels ) + 1, reaction_data[ 'sx' ], reaction_data[ 'sy' ], app = self )
         pixel.set_reaction(
             self.registry.reaction_factory( pixel, reaction_data, reaction_name,
                                             self.registry.trigger_log, self.cast_lock )
         )
-        rx = reaction_data['sx']
-        ry = reaction_data['sy']
-        print( f"[{pixel_index}] {BLUE}{reaction_name}{RESET} @ ({rx}, {ry})" )
+        self.pixels.append( pixel )
+        print( f"[{pixel.index}] {BLUE}{reaction_name}{RESET} @ ({reaction_data['sx']}, {reaction_data['sy']})" )
 
     def exit_application( self ):
         """
@@ -264,17 +227,19 @@ class CooldownReadiness:
 class ColorReadiness:
     """
     Pixel-color readiness: a reaction is ready only while a separate "available" indicator pixel
-    (e.g. a skill icon) shows the expected color. Suited to emergency abilities whose cooldown is
-    too variable to time, but which expose an on-screen ready/not-ready indicator.
+    (e.g. a skill icon) shows the expected color, judged within this check's own `tolerance`.
+    Suited to emergency abilities whose cooldown is too variable to time, but which expose an
+    on-screen ready/not-ready indicator.
 
     A short `lockout` after firing suppresses immediate re-triggering during the brief window before
     the indicator updates to its not-ready color (otherwise the poll loop could fire several times).
     """
 
-    def __init__( self, px, py, color, lockout = 0.5 ):
+    def __init__( self, px, py, color, tolerance, lockout = 0.5 ):
         self.px = px
         self.py = py
         self.color = color
+        self.tolerance = tolerance
         self.lockout = lockout
         self._last = -1.0
 
@@ -282,7 +247,7 @@ class ColorReadiness:
         if self._last >= 0 and ( time.perf_counter() - self._last ) < self.lockout:
             return False
         observed = get_pixel_color( self.px, self.py )
-        return observed is not None and colors_similar( observed, self.color )
+        return observed is not None and colors_similar( observed, self.color, self.tolerance )
 
     def fired( self ):
         self._last = time.perf_counter()
@@ -315,9 +280,9 @@ class PxlReaction:
     the readiness/availability gate.
     """
 
-    def __init__( self, pxl, reaction_type, reaction_color, reaction, readiness, confirm = 0.0,
-                  ignore_colors = None, name = None, trigger_log = None, cast_time = 0.0,
-                  cast_lock = None ):
+    def __init__( self, pxl, reaction_type, reaction_color, tolerance, reaction, readiness,
+                  confirm = 0.0, ignore_colors = None, name = None, trigger_log = None,
+                  cast_time = 0.0, cast_lock = None ):
         """
         Initialize a PxlReaction instance.
 
@@ -326,6 +291,9 @@ class PxlReaction:
             reaction_type (str): Type of reaction; "react_if_not_color" fires when the pixel deviates
                 from `reaction_color`, "react_if_color" fires when it matches `reaction_color`.
             reaction_color (tuple[int, int, int]): Target RGB color for the reaction.
+            tolerance (int): SSD tolerance for this reaction's color comparisons (firing condition
+                and ignore_colors); each reaction carries its own so volatile screen regions can be
+                tuned independently.
             reaction (callable): Function to execute when the reaction triggers.
             readiness: A readiness strategy exposing ready()/fired() (CooldownReadiness or
                 ColorReadiness). Gates firing on either elapsed time or an availability pixel color.
@@ -347,6 +315,7 @@ class PxlReaction:
         self.pxl = pxl
         self.type = reaction_type
         self.reaction_color = reaction_color
+        self.tolerance = tolerance
         self.readiness = readiness
         self.confirm = confirm
         self.reaction = reaction
@@ -370,9 +339,10 @@ class PxlReaction:
         """
         rgb = self.pxl.rgb
         if self.type == "react_if_color":
-            return colors_similar( rgb, self.reaction_color )
+            return colors_similar( rgb, self.reaction_color, self.tolerance )
         # default: react_if_not_color
-        return colors_different( rgb, self.reaction_color ) and not matches_any( rgb, self.ignore_colors )
+        return ( colors_different( rgb, self.reaction_color, self.tolerance )
+                 and not matches_any( rgb, self.ignore_colors, self.tolerance ) )
 
     def evaluate( self ):
         """
@@ -414,31 +384,29 @@ class PxlReaction:
         self.readiness.fired()
 
 
-def _build_one_readiness( spec, data ):
-    """Build a single readiness strategy from one `ready` spec dict."""
-    rtype = spec.get( 'type', 'cooldown' )
-    if rtype == 'color':
-        return ColorReadiness( spec[ 'px' ], spec[ 'py' ], spec[ 'color' ], spec.get( 'lockout', 0.5 ) )
-    if rtype == 'cooldown':
-        return CooldownReadiness( spec.get( 'cooldown', data.get( 'cooldown', 0.5 ) ) )
-    raise ValueError( f"Unknown readiness type: {rtype}" )
+def _build_one_readiness( spec ):
+    """Build a single readiness strategy from one normalized `ready` spec dict."""
+    if spec[ 'type' ] == 'color':
+        return ColorReadiness( spec[ 'px' ], spec[ 'py' ], spec[ 'color' ],
+                               spec[ 'tolerance' ], spec[ 'lockout' ] )
+    return CooldownReadiness( spec[ 'cooldown' ] )
 
 
 def build_readiness( data ):
     """
-    Construct a reaction's readiness strategy from its registry entry.
+    Construct a reaction's readiness strategy from its registry entry (normalized by pxl_config).
 
-    `ready` may be a single spec dict, or a LIST of spec dicts that must ALL be ready (AND, via
-    CompositeReadiness). Each spec is { 'type': 'color', 'px', 'py', 'color', 'lockout'? } for
-    pixel-color readiness, or { 'type': 'cooldown', 'cooldown' } for time readiness. When `ready` is
-    absent the `cooldown` shorthand is used (time readiness).
+    `ready` is a list of spec dicts that must ALL be ready (AND, via CompositeReadiness): each is
+    { 'type': 'color', 'px', 'py', 'color', 'tolerance', 'lockout' } for pixel-color readiness, or
+    { 'type': 'cooldown', 'cooldown' } for time readiness. When `ready` is None the `cooldown`
+    shorthand is used (time readiness).
     """
-    spec = data.get( 'ready' )
-    if spec is None:
-        return CooldownReadiness( data.get( 'cooldown', 0.5 ) )
-    if isinstance( spec, ( list, tuple ) ):
-        return CompositeReadiness( [ _build_one_readiness( s, data ) for s in spec ] )
-    return _build_one_readiness( spec, data )
+    specs = data[ 'ready' ]
+    if specs is None:
+        return CooldownReadiness( data[ 'cooldown' ] )
+    if len( specs ) == 1:
+        return _build_one_readiness( specs[ 0 ] )
+    return CompositeReadiness( [ _build_one_readiness( s ) for s in specs ] )
 
 
 def build_reaction( pixel, data, name, trigger_log, cast_lock ):
@@ -451,13 +419,14 @@ def build_reaction( pixel, data, name, trigger_log, cast_lock ):
         pxl = pixel,
         reaction_type = data[ 'type' ],
         reaction_color = data[ 'reaction_color' ],
+        tolerance = data[ 'tolerance' ],
         reaction = data[ 'reaction' ],
         readiness = build_readiness( data ),
-        confirm = data.get( 'confirm', 0.0 ),
-        ignore_colors = data.get( 'ignore_colors' ),
+        confirm = data[ 'confirm' ],
+        ignore_colors = data[ 'ignore_colors' ],
         name = name,
         trigger_log = trigger_log,
-        cast_time = data.get( 'cast_time', 0.0 ),
+        cast_time = data[ 'cast_time' ],
         cast_lock = cast_lock,
     )
 
@@ -479,12 +448,12 @@ class TriggerLog:
     consulted. The on-disk shape is { reaction_name: { "r,g,b": count } }.
     """
 
-    def __init__( self, collapse_tolerance = COLOR_TOLERANCE, verbose = False, path = None,
+    def __init__( self, collapse_tolerance, verbose = False, path = None,
                   save_interval = 60.0 ):
         """
         Args:
-            collapse_tolerance (int): SSD threshold below which two colors are merged in the report.
-                Defaults to COLOR_TOLERANCE (the same "similar enough" threshold reactions use).
+            collapse_tolerance (int): SSD threshold below which two colors are merged in the report
+                (typically the settings default color tolerance).
             verbose (bool): When True, echo a compact swatch line on every recorded trigger. Off by
                 default to avoid scrolling the terminal during play.
             path (str | None): JSON file for persistence. None disables all disk I/O (in-memory only).
@@ -616,162 +585,74 @@ class TriggerLog:
 
 
 class PxlReactionRegistry:
-
-    reaction_types = [ "react_if_color", "react_if_not_color" ]
-
-    # (166, 1235) - (136, 192, 204
-    cv_reaction_color = (136, 192, 204)
-
-    # Benign off-colors at the CV pixel that must NOT trigger (e.g. curse tints); same role as
-    # hp_ignore_colors but for the CV1 reaction.
-    cv_ignore_colors = [
-        (186, 140, 207),
-    ]
-
-    # CV1 readiness: fire only when BOTH a 6 s minimum cooldown has elapsed AND the skill's icon
-    # shows it is available (the cooldown is variable, so the color guards true availability while
-    # the 6 s floor prevents rapid re-triggering).
-    # (2149, 1363) - (108, 178, 197)
-    cv_ready_check = [
-        { 'type': 'cooldown', 'cooldown': 6 },
-        { 'type': 'color', 'px': 2149, 'py': 1363, 'color': (108, 178, 197) },
-    ]
-
-    # HP is now Energy Shield for my Build
-    # (83, 1223) - (74, 114, 126)
-    hp_reaction_color = (74, 114, 126)
-
-    # Benign off-colors at the HP/ES pixel that must NOT trigger a reaction: sustained status-effect
-    # tints (poison, curse, etc.) shift the orb color without indicating real depletion. Populate by
-    # reading the tinted orb with the Ctrl+P pixel monitor and adding each RGB here. Empty until
-    # measured; an empty list disables the ignore filter.
-    hp_ignore_colors = []
-
-    # (2418, 1357) - (14, 47, 100)
-    mp_reaction_color = (14, 50, 105)
-
-    # How long our flasks take to recharge (don't try to use them more often than this)
-    hp_cooldown = 5
-    mp_cooldown = 3
-
-    # Seconds an off-color reading must persist before a reaction fires. Filters brief status-effect
-    # tints (shocked/poisoned, etc.) that change tghe pixel for only a few frames. Raise if transient
-    # effects still leak through; lower if real reactions feel sluggish.
-    confirm_window = 0.1
-
-    # Trigger-log instrumentation: when enabled, every reaction firing records the color that caused
-    # it, and a collapsed frequency report is printed at exit. Use the report to discover which
-    # colors fire reactions most often (poison/curse tints dominate) and add them to ignore_colors.
-    trigger_log_enabled = True
-    # Echo a swatch line on every trigger (noisy); leave False to only see the exit report.
-    trigger_log_verbose = False
-    # SSD threshold for merging near-identical colors in the report (defaults to COLOR_TOLERANCE).
-    trigger_log_collapse_tolerance = COLOR_TOLERANCE
-    # JSON file the trigger tally persists to (accumulates across sessions); None disables disk I/O.
-    trigger_log_path = "trigger_log.json"
-    # Seconds between periodic saves during play; the file is also written on exit.
-    trigger_log_save_interval = 60.0
-
-    # --- Capture debug mode (optional; requires pxl_capture.py + `pip install mss`) ---------------
-    # When enabled, each reaction saves a PNG of a screen region centered on its pixel, captured
-    # just BEFORE the key is sent, so misfires can be verified by eye. Off by default and fully
-    # isolated: turning it off restores the plain capture-free path with no runtime branching, and
-    # deleting pxl_capture.py + the capture block in __init__ removes it entirely.
-    capture_enabled = False
-    capture_dir = "captures"
-    capture_w = 400
-    capture_h = 300
+    """
+    Builds the runtime reaction registry from the profile configuration. Each profile reaction's
+    declarative `press`/`glyph` pair is synthesized into the reaction callable (a PI.press plus the
+    timing log line), replacing the react_XX methods of the inline-config era. Structural
+    validation happens at load time in pxl_config.
+    """
 
     def __init__( self, app ):
-        """
-        Class to hold a registry of predefined reactions that can be assigned to pixels.
-        """
-
-        # Safeguard against random typos that have gotten me killed before...
-        # if self.hp_cooldown > 5 or self.mp_cooldown > 5:
-        #     raise ValueError( f"Flask cooldowns: {self.hp_cooldown}/{self.mp_cooldown}" )
-
         self.app = app
+        settings = app.settings
 
         # Optional trigger-color instrumentation; None when disabled so PxlReaction skips recording
+        tlog = settings[ 'trigger_log' ]
         self.trigger_log = (
             TriggerLog(
-                collapse_tolerance = self.trigger_log_collapse_tolerance,
-                verbose = self.trigger_log_verbose,
-                path = self.trigger_log_path,
-                save_interval = self.trigger_log_save_interval,
+                collapse_tolerance = tlog[ 'collapse_tolerance' ],
+                verbose = tlog[ 'verbose' ],
+                path = tlog[ 'path' ],
+                save_interval = tlog[ 'save_interval' ],
             )
-            if self.trigger_log_enabled else None
+            if tlog[ 'enabled' ] else None
         )
 
         # Reaction construction goes through a factory so the hot path stays branch-free. Default is
         # the plain capture-free builder; capture debug mode swaps it once, here.
         self.reaction_factory = build_reaction
         self.snapshot = None
-        if self.capture_enabled:
+        capture = settings[ 'capture' ]
+        if capture[ 'enabled' ]:
             try:
                 from pxl_capture import SnapshotCapture, make_capturing_factory
             except ImportError as exc:
                 print( f"{RED}capture mode needs the 'mss' package ({exc}); running without it.{RESET}" )
             else:
-                self.snapshot = SnapshotCapture( self.capture_dir )
-                self.reaction_factory = make_capturing_factory( self.snapshot, self.capture_w, self.capture_h )
+                self.snapshot = SnapshotCapture( capture[ 'dir' ] )
+                self.reaction_factory = make_capturing_factory( self.snapshot,
+                                                                capture[ 'width' ], capture[ 'height' ] )
 
         self.reactions_registry = {
-            'HP1': {
-                'sx': 83,
-                'sy': 1223,
-                'type': 'react_if_not_color',
-                'reaction_color': self.hp_reaction_color,
-                'cooldown': self.hp_cooldown,
-                'confirm': self.confirm_window,
-                'ignore_colors': self.hp_ignore_colors,
-                'reaction': self.react_HP
-            },
-            # (2415, 1356) - (14, 50, 105)
-            'MP1': {
-                'sx': 2415,
-                'sy': 1356,
-                'type': 'react_if_not_color',
-                'reaction_color': self.mp_reaction_color,
-                'cooldown': self.mp_cooldown,
-                'confirm': self.confirm_window,
-                'reaction': self.react_MP
-            },
-            'CV1': {
-                'sx': 166,
-                'sy': 1235,
-                'type': 'react_if_not_color',
-                'reaction_color': self.cv_reaction_color,
-                'ready': self.cv_ready_check,
-                'confirm': self.confirm_window,
-                'ignore_colors': self.cv_ignore_colors,
-                'cast_time': 0.4,
-                'reaction': self.react_CV
-            }
+            name: self._build_entry( name, data )
+            for name, data in app.profile[ 'reactions' ].items()
         }
 
         self.clock = time.perf_counter
-        
-        self.last_reaction_ticks = {
-            'HP1': None,
-            'MP1': None,
-            'CV1': None,
+        self.last_reaction_ticks = { name: None for name in self.reactions_registry }
+
+    def _build_entry( self, name, data ):
+        """Translate a normalized profile reaction into a runtime registry entry."""
+        return {
+            'sx': data[ 'x' ],
+            'sy': data[ 'y' ],
+            'type': data[ 'type' ],
+            'reaction_color': data[ 'color' ],
+            'tolerance': data[ 'tolerance' ],
+            'cooldown': data[ 'cooldown' ],
+            'ready': data[ 'ready' ],
+            'confirm': data[ 'confirm' ],
+            'ignore_colors': data[ 'ignore_colors' ],
+            'cast_time': data[ 'cast_time' ],
+            'reaction': self._make_reaction( name, data[ 'press' ], data[ 'glyph' ] ),
         }
 
-        self.validate_registry()
-
-    def react_HP( self ):
-        self.app.PI.press( "F" )
-        self._log_reaction( 'HP1', "+❤️+" )
-
-    def react_MP( self ):
-        self.app.PI.press( "2" )
-        self._log_reaction( 'MP1', "*✨*" )
-
-    def react_CV( self ):
-        self.app.PI.press( "T" )
-        self._log_reaction( 'CV1', "~🧿~" )
+    def _make_reaction( self, name, press, glyph ):
+        """Synthesize the reaction callable: send the configured key and log the firing."""
+        def _react():
+            self.app.PI.press( press )
+            self._log_reaction( name, glyph )
+        return _react
 
     def _log_reaction( self, key, glyph ):
         now_tick = self.clock()
@@ -786,84 +667,6 @@ class PxlReactionRegistry:
 
         now_wall = time.strftime( "%H:%M:%S", time.localtime() )
         print( f"{glyph} {MAGENTA}{now_wall}{RESET} Δt {MAGENTA}{delta_text}{RESET}" )
-
-    def validate_registry( self ):
-        """
-        Do a validation pass at load time to try and ensure there are no invalid entries in the reaction registry.
-
-        Validate the reactions_registry ensuring every entry has:
-            - sx >= -2560 and sx < 2560
-            - sy >= 0 and sy < 1440
-            - type as one of reaction_types
-            - valid reaction_color as rgb tuple (0-255)
-            - cooldown values that are not unreasonably high
-            - reaction refers to a valid function
-        """
-        for name, reaction in self.reactions_registry.items():
-            # Validate `sx` and `sy` coordinates
-            if not ( -2560 <= reaction.get( 'sx', 0 ) < 2560 ):
-                raise ValueError( f"Invalid 'sx' for reaction '{name}': {reaction['sx']}" )
-            if not ( 0 <= reaction.get( 'sy', 0 ) < 1440 ):
-                raise ValueError( f"Invalid 'sy' for reaction '{name}': {reaction['sy']}" )
-
-            # Validate reaction type
-            if reaction.get( 'type' ) not in self.reaction_types:
-                raise ValueError( f"Invalid 'type' for reaction '{name}': {reaction['type']}" )
-
-            # Validate `reaction_color`
-            color = reaction.get( 'reaction_color' )
-            if not ( isinstance( color, tuple ) and len( color ) == 3 and all( 0 <= c <= 255 for c in color ) ):
-                raise ValueError( f"Invalid 'reaction_color' for reaction '{name}': {color}" )
-
-            # Validate readiness: an explicit `ready` spec (a single dict or a list of dicts, each
-            # color or cooldown) or the `cooldown` shorthand (time readiness).
-            ready = reaction.get( 'ready' )
-            if ready is not None:
-                specs = ready if isinstance( ready, ( list, tuple ) ) else [ ready ]
-                for spec in specs:
-                    rtype = spec.get( 'type', 'cooldown' )
-                    if rtype == 'color':
-                        if not ( -2560 <= spec.get( 'px', 0 ) < 2560 ) or not ( 0 <= spec.get( 'py', 0 ) < 1440 ):
-                            raise ValueError( f"Invalid 'ready' pixel for reaction '{name}': {spec}" )
-                        rcolor = spec.get( 'color' )
-                        if not ( isinstance( rcolor, tuple ) and len( rcolor ) == 3 and all( 0 <= c <= 255 for c in rcolor ) ):
-                            raise ValueError( f"Invalid 'ready' color for reaction '{name}': {rcolor}" )
-                        lockout = spec.get( 'lockout', 0 )
-                        if not ( 0 <= lockout < 10 ):
-                            raise ValueError( f"Unreasonable 'ready' lockout for reaction '{name}': {lockout}" )
-                    elif rtype == 'cooldown':
-                        cd = spec.get( 'cooldown', 0 )
-                        if not ( 0 < cd < 180 ):
-                            raise ValueError( f"Unreasonable 'ready' cooldown for reaction '{name}': {cd}" )
-                    else:
-                        raise ValueError( f"Unknown 'ready' type for reaction '{name}': {rtype}" )
-            else:
-                cooldown = reaction.get( 'cooldown', 0 )
-                if not ( 0 < cooldown < 180 ): # avoid ms/s confusion with cooldowns (never > 3 minutes)
-                    raise ValueError( f"Unreasonable 'cooldown' for reaction '{name}': {cooldown}" )
-
-            # Validate `confirm` (debounce window); 0 disables debounce, cap well under a cooldown
-            confirm = reaction.get( 'confirm', 0 )
-            if not ( 0 <= confirm < 2 ):
-                raise ValueError( f"Unreasonable 'confirm' for reaction '{name}': {confirm}" )
-
-            # Validate optional `cast_time`; 0 disables cast protection, cap at a sane ceiling
-            cast_time = reaction.get( 'cast_time', 0 )
-            if not ( 0 <= cast_time < 10 ):
-                raise ValueError( f"Unreasonable 'cast_time' for reaction '{name}': {cast_time}" )
-
-            # Validate optional `ignore_colors` (benign off-colors); must be a list of RGB tuples
-            ignore_colors = reaction.get( 'ignore_colors' )
-            if ignore_colors is not None:
-                if not isinstance( ignore_colors, ( list, tuple ) ):
-                    raise ValueError( f"Invalid 'ignore_colors' for reaction '{name}': must be a list" )
-                for ic in ignore_colors:
-                    if not ( isinstance( ic, tuple ) and len( ic ) == 3 and all( 0 <= c <= 255 for c in ic ) ):
-                        raise ValueError( f"Invalid entry in 'ignore_colors' for reaction '{name}': {ic}" )
-
-            # Validate `reaction` as a callable
-            if not callable( reaction.get( 'reaction' ) ):
-                raise ValueError( f"Invalid 'reaction' for reaction '{name}': Must be a callable." )
 
 
 if __name__ == "__main__":

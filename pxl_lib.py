@@ -10,9 +10,6 @@ import time
 from ctypes import wintypes
 from ansi import *
 
-# Allow for this much fluctuation in color before considering it "different enough"
-COLOR_TOLERANCE = 4000
-
 HDC = ctypes.windll.user32.GetDC( 0 )
 WPT = wintypes.POINT()
 
@@ -87,20 +84,18 @@ def get_color_difference( c1, c2 ):
     """
     return sum( ( a - b ) ** 2 for a, b in zip( c1, c2 ) )
 
-def colors_different( c1, c2 ):
+def colors_different( c1, c2, tolerance ):
     """
-    True when the SSD of two colors exceeds tolerance (colors are "different enough")
+    True when the SSD of two colors exceeds `tolerance` (colors are "different enough").
+    A tolerance of 0 means any deviation counts as different (exact-match semantics).
     """
-    delta = get_color_difference( c1, c2 )
-    # if delta > COLOR_TOLERANCE:
-    #     print( f"Color difference: {delta}" )
-    return delta > COLOR_TOLERANCE
+    return get_color_difference( c1, c2 ) > tolerance
 
-def colors_similar( c1, c2 ):
+def colors_similar( c1, c2, tolerance ):
     """
-    Return true if two colors are similar enough to be considered the same.
+    Return true if two colors are within `tolerance` of each other (similar enough to be the same).
     """
-    return not colors_different( c1, c2 )
+    return not colors_different( c1, c2, tolerance )
 
 class CastLock:
     """
@@ -125,9 +120,9 @@ class CastLock:
             return time.perf_counter() < self._until
 
 
-def matches_any( color, palette ):
+def matches_any( color, palette, tolerance ):
     """
-    True when `color` is similar (within COLOR_TOLERANCE) to any color in `palette`.
+    True when `color` is similar (within `tolerance`) to any color in `palette`.
 
     Used as a cheap allow-list test against an already-read pixel color; an empty or None palette
     yields False. Each comparison is a few integer ops, so testing a small palette every poll tick
@@ -135,23 +130,25 @@ def matches_any( color, palette ):
     """
     if not palette:
         return False
-    return any( colors_similar( color, ref ) for ref in palette )
+    return any( colors_similar( color, ref, tolerance ) for ref in palette )
 
 
 class ColorCondition:
     """
     A single pixel-color condition: the pixel at (px, py) must either match `color` (match = True)
-    or differ from it (match = False). `passes()` reads the pixel live and applies the test.
+    or differ from it (match = False), judged within this condition's own `tolerance` (0 = exact).
+    `passes()` reads the pixel live and applies the test.
 
     Used to compose multi-layered checks where several conditions must all hold (logical AND).
     """
 
-    __slots__ = ( 'px', 'py', 'color', 'match' )
+    __slots__ = ( 'px', 'py', 'color', 'match', 'tolerance' )
 
-    def __init__( self, px, py, color, match = True ):
+    def __init__( self, px, py, color, tolerance, match = True ):
         self.px = px
         self.py = py
         self.color = color
+        self.tolerance = tolerance
         self.match = match
 
     def passes( self ):
@@ -163,8 +160,8 @@ class ColorCondition:
         if observed is None:
             return False
         if self.match:
-            return colors_similar( observed, self.color )
-        return colors_different( observed, self.color )
+            return colors_similar( observed, self.color, self.tolerance )
+        return colors_different( observed, self.color, self.tolerance )
 
     def describe( self ):
         """Short '+'/'-' status glyph for terminal logging (matched expectation -> green '+')."""
@@ -197,28 +194,6 @@ def get_mouse_pos():
     """
     ctypes.windll.user32.GetCursorPos( ctypes.byref( WPT ) )
     return WPT.x, WPT.y
-
-def validate_color_at( x, y, color ):
-    """
-    Validate the color at the given coordinates (x, y) against the expected color.
-
-    Args:
-        x (int): The x-coordinate of the pixel.
-        y (int): The y-coordinate of the pixel.
-        color (tuple[int, int, int]): The expected (R, G, B) color values.
-
-    Returns:
-        bool: True if the color matches, False otherwise.
-    """
-    pixel_color = get_pixel_color( x, y )
-    if pixel_color is None:
-        return False
-
-    # validated = pixel_color == color
-    # if not validated:
-    #     print( pixel_color )
-
-    return pixel_color == color
 
 def rgb_to_hex( rgb ):
     """Convert an RGB tuple to a hexadecimal color."""

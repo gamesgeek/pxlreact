@@ -25,7 +25,8 @@ import mss
 import mss.tools
 
 from pxlreactHL import PxlReaction, build_readiness
-from pxl_lib import describe_color, color_name, get_color_difference, COLOR_TOLERANCE
+from pxl_config import get_settings
+from pxl_lib import describe_color, color_name, get_color_difference
 from ansi import *
 
 
@@ -111,13 +112,14 @@ def make_capturing_factory( capture, width, height ):
             pxl = pixel,
             reaction_type = data[ 'type' ],
             reaction_color = data[ 'reaction_color' ],
+            tolerance = data[ 'tolerance' ],
             reaction = data[ 'reaction' ],
             readiness = build_readiness( data ),
-            confirm = data.get( 'confirm', 0.0 ),
-            ignore_colors = data.get( 'ignore_colors' ),
+            confirm = data[ 'confirm' ],
+            ignore_colors = data[ 'ignore_colors' ],
             name = name,
             trigger_log = trigger_log,
-            cast_time = data.get( 'cast_time', 0.0 ),
+            cast_time = data[ 'cast_time' ],
             cast_lock = cast_lock,
             capture = capture,
             bbox = bbox,
@@ -138,9 +140,10 @@ def _parse_capture( path ):
     return reaction, rgb
 
 
-def report_captures( out_dir = "captures", collapse_tolerance = COLOR_TOLERANCE ):
+def report_captures( out_dir = "captures", collapse_tolerance = None ):
     """
     Sort loose capture PNGs in `out_dir` into per-color subdirectories, then print a summary.
+    `collapse_tolerance` defaults to the settings default color tolerance.
 
     The triggering color is read from each filename (the trailing `_r-g-b` token). Within each
     reaction, colors are clustered by `collapse_tolerance` so near-identical shades share one folder;
@@ -149,6 +152,9 @@ def report_captures( out_dir = "captures", collapse_tolerance = COLOR_TOLERANCE 
     ignore-worthy colors. Already-sorted images (those inside subfolders) are left untouched, so the
     routine is safe to re-run as new captures accumulate.
     """
+    if collapse_tolerance is None:
+        collapse_tolerance = get_settings()[ 'color' ][ 'default_tolerance' ]
+
     loose = sorted( glob.glob( os.path.join( out_dir, "*.png" ) ) )
     if not loose:
         print( f"{YELLOW}No unsorted captures in {CYAN}{out_dir}{RESET}.{RESET}" )
