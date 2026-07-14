@@ -5,7 +5,6 @@ lighter weight command line interface.
 This is the project's main module which is responsible for assigning reactions to pixels and then
 polling those pixels for changes.
 """
-import ctypes
 import json
 import os
 import time
@@ -19,7 +18,8 @@ from pxl_remap import PxlRemapper
 from pxl_lib import *
 from ansi import *
 
-from pxl_config import get_settings, load_profile
+from pxl_config import get_settings, load_profile, profile_points
+from pxl_status import StatusHub
 
 class PxlReactApp:
     """
@@ -35,6 +35,15 @@ class PxlReactApp:
         self.settings = get_settings()
         self.profile = load_profile()
 
+        # One mss grab per tick serves every configured pixel; register their bounding region
+        PIXELS.max_age = self.settings[ 'app' ][ 'frame_max_age' ]
+        PIXELS.register_points( profile_points( self.profile ) )
+
+        # Reporting funnel: publishers record runtime state here; the status bar (when enabled)
+        # renders it. Gameplay events produce no terminal output.
+        gui_cfg = self.settings[ 'gui' ]
+        self.hub = StatusHub()
+
         # On-demand window/marker gate; check() is evaluated live at each reaction/remap fire point
         self.wincheck = PxlWinCheck( self.profile[ 'wincheck' ] )
 
@@ -42,17 +51,21 @@ class PxlReactApp:
 
         self.stop_event = threading.Event()
 
+        # Set by the remapper's Ctrl+<reload_key> hotkey; consumed by the main loop between ticks
+        self._reload_event = threading.Event()
+
         # Shared cast lock: a cast-time reaction arms it so the remapper drops keypresses that would
         # otherwise interrupt the cast; remap actions with a cast_time arm the same lock.
         self.cast_lock = CastLock()
+        self.hub.attach( self.cast_lock )
 
         # Keyboard-capture remapping layer (starts its own background thread); also owns the
-        # F12/ESC quit and Ctrl+P report-color command hotkeys
+        # F12/ESC quit, Ctrl+P report-color, and Ctrl+R reload command hotkeys
         self.remapper = PxlRemapper( self.wincheck,
                                      self.profile[ 'actions' ],
                                      self.profile[ 'rotations' ],
-                                     self.profile[ 'remaps' ],
-                                     on_quit = self.exit_application, cast_lock = self.cast_lock )
+                                     on_quit = self.exit_application, cast_lock = self.cast_lock,
+                                     hub = self.hub, on_reload = self._reload_event.set )
 
         self.tick_interval = self.settings[ 'app' ][ 'tick_interval' ]
 
@@ -63,6 +76,20 @@ class PxlReactApp:
         for name, data in self.profile[ 'reactions' ].items():
             if data[ 'enabled' ]:
                 self.load_reaction( name )
+        self.hub.set_reactions( [ name for name, data in self.profile[ 'reactions' ].items()
+                                  if data[ 'enabled' ] ] )
+
+        # Optional in-process status bar (DPG render loop on a daemon thread); fully absent when
+        # disabled so headless runs carry no GUI dependency
+        self.statusbar = None
+        if gui_cfg[ 'statusbar_enabled' ]:
+            try:
+                from pxl_statusbar import StatusBar
+            except ImportError as exc:
+                print( f"{RED}status bar needs the 'dearpygui' package ({exc}); running without it.{RESET}" )
+            else:
+                self.statusbar = StatusBar( self.hub, gui_cfg )
+                self.statusbar.start()
 
     def start_update_loop( self ):
         """
@@ -70,10 +97,16 @@ class PxlReactApp:
         """
         try:
             while not self.stop_event.is_set():
+                # Apply a pending profile reload between ticks, never mid-evaluation
+                if self._reload_event.is_set():
+                    self._reload_event.clear()
+                    self._reload_profile()
+
                 # One live gate read per tick; when inactive (wrong window or marker off, e.g. a
                 # loading screen) clear pending streaks so a confirmation can't carry across the
                 # gap and fire the instant the context returns.
                 active = self.wincheck.check()
+                self.hub.set_active( active )
                 for pxl in self.pixels:
                     if active:
                         pxl.update_color()
@@ -103,6 +136,36 @@ class PxlReactApp:
         self.pixels.append( pixel )
         print( f"[{pixel.index}] {BLUE}{reaction_name}{RESET} @ ({reaction_data['sx']}, {reaction_data['sy']})" )
 
+    def _reload_profile( self ):
+        """
+        Re-read profile.json and apply it to the running app: wincheck markers, reaction registry
+        and monitored pixels, and the remapper's bindings (cooldown state resets). On a validation
+        failure the current configuration keeps running and the error is reported.
+        """
+        try:
+            profile = load_profile()
+            # Rebind first: it is the step most likely to raise beyond config validation (e.g. an
+            # unknown source key name at scan-code lookup), and it swaps its tables atomically at
+            # the end, so a failure here leaves the running configuration fully intact.
+            self.remapper.rebind( profile[ 'actions' ], profile[ 'rotations' ] )
+        except Exception as exc:
+            print( f"{RED}reload failed: {exc}{RESET}" )
+            return
+
+        self.profile = profile
+        PIXELS.register_points( profile_points( profile ) )
+        self.wincheck.update( profile[ 'wincheck' ] )
+        self.registry.rebuild()
+
+        self.pixels = []
+        for name, data in profile[ 'reactions' ].items():
+            if data[ 'enabled' ]:
+                self.load_reaction( name )
+        self.hub.set_reactions( [ name for name, data in profile[ 'reactions' ].items()
+                                  if data[ 'enabled' ] ] )
+
+        print( f"{GREEN}profile reloaded{RESET}" )
+
     def exit_application( self ):
         """
         Exit the application cleanly, releasing resources.
@@ -113,8 +176,7 @@ class PxlReactApp:
         """
         Clean up resources and background workers. Safe to call multiple times.
         """
-        global HDC
-        print( f"ℹ️ {RED}Exiting PxlReactApp...{RE}" )
+        print( f"ℹ️ {RED}Exiting PxlReactApp...{RESET}" )
 
         # Persist and surface accumulated trigger data before tearing down so the user can spot
         # ignorable colors; the forced save guarantees the final session's events reach disk.
@@ -132,6 +194,12 @@ class PxlReactApp:
             except Exception:
                 pass
 
+        if self.statusbar is not None:
+            try:
+                self.statusbar.stop()
+            except Exception:
+                pass
+
         try:
             self.remapper.stop()
         except Exception:
@@ -139,11 +207,6 @@ class PxlReactApp:
 
         try:
             self.PI.close()
-        except Exception:
-            pass
-
-        try:
-            ctypes.windll.user32.ReleaseDC( 0, HDC )
         except Exception:
             pass
 
@@ -587,8 +650,8 @@ class TriggerLog:
 class PxlReactionRegistry:
     """
     Builds the runtime reaction registry from the profile configuration. Each profile reaction's
-    declarative `press`/`glyph` pair is synthesized into the reaction callable (a PI.press plus the
-    timing log line), replacing the react_XX methods of the inline-config era. Structural
+    declarative `press` key is synthesized into the reaction callable (a PI.press plus a hub
+    timing update), replacing the react_XX methods of the inline-config era. Structural
     validation happens at load time in pxl_config.
     """
 
@@ -623,12 +686,15 @@ class PxlReactionRegistry:
                 self.reaction_factory = make_capturing_factory( self.snapshot,
                                                                 capture[ 'width' ], capture[ 'height' ] )
 
+        self.clock = time.perf_counter
+        self.rebuild()
+
+    def rebuild( self ):
+        """(Re)build registry entries from the app's current profile; fire timing resets."""
         self.reactions_registry = {
             name: self._build_entry( name, data )
-            for name, data in app.profile[ 'reactions' ].items()
+            for name, data in self.app.profile[ 'reactions' ].items()
         }
-
-        self.clock = time.perf_counter
         self.last_reaction_ticks = { name: None for name in self.reactions_registry }
 
     def _build_entry( self, name, data ):
@@ -644,17 +710,17 @@ class PxlReactionRegistry:
             'confirm': data[ 'confirm' ],
             'ignore_colors': data[ 'ignore_colors' ],
             'cast_time': data[ 'cast_time' ],
-            'reaction': self._make_reaction( name, data[ 'press' ], data[ 'glyph' ] ),
+            'reaction': self._make_reaction( name, data[ 'press' ] ),
         }
 
-    def _make_reaction( self, name, press, glyph ):
+    def _make_reaction( self, name, press ):
         """Synthesize the reaction callable: send the configured key and log the firing."""
         def _react():
             self.app.PI.press( press )
-            self._log_reaction( name, glyph )
+            self._log_reaction( name )
         return _react
 
-    def _log_reaction( self, key, glyph ):
+    def _log_reaction( self, key ):
         now_tick = self.clock()
         last_tick = self.last_reaction_ticks.get( key )
         delta_text = "--"
@@ -665,8 +731,10 @@ class PxlReactionRegistry:
 
         self.last_reaction_ticks[ key ] = now_tick
 
-        now_wall = time.strftime( "%H:%M:%S", time.localtime() )
-        print( f"{glyph} {MAGENTA}{now_wall}{RESET} Δt {MAGENTA}{delta_text}{RESET}" )
+        # The color that fired is the monitored pixel's last reading (recorded for the swatch)
+        rgb = next( ( p.rgb for p in self.app.pixels
+                      if p.reaction is not None and p.reaction.name == key ), None )
+        self.app.hub.record_reaction( key, delta_text, rgb )
 
 
 if __name__ == "__main__":

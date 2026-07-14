@@ -10,18 +10,31 @@ from pxl_config import get_settings
 
 # Using local pyinterception files for better control and stability
 import pyinterception.src.interception as pyint
-pi = pyint.Interception()
 
-# Find our keyboard within the devices list
-my_hwid = get_settings()[ 'devices' ][ 'keyboard_hwid' ]
 
-idx = 0
-for device in pi.devices:
-    hwid = device.get_HWID()
-    if hwid is not None and my_hwid in hwid:
-         pyint.set_devices( keyboard = idx )
-         break
-    idx += 1
+def detect_device_index( my_hwid ):
+    """
+    Find the interception device index whose HWID contains `my_hwid`, using a short-lived probe
+    context. Returns the index, or None if no match is found (callers should fall back to the
+    library/context default). Shared with PxlRemapper's capture-context setup.
+    """
+    probe = pyint.Interception()
+    try:
+        idx = 0
+        for device in probe.devices:
+            hwid = device.get_HWID()
+            if hwid is not None and my_hwid in hwid:
+                return idx
+            idx += 1
+    finally:
+        probe.destroy()
+    return None
+
+
+# Point the library's default send context at our keyboard
+_idx = detect_device_index( get_settings()[ 'devices' ][ 'keyboard_hwid' ] )
+if _idx is not None:
+    pyint.set_devices( keyboard = _idx )
 
 
 class PxlIntercept:
@@ -49,7 +62,7 @@ class PxlIntercept:
 
     def _precompute_delays( self ):
         """
-        Precompute random delays for press (hold) and react (pre-delay).
+        Precompute random hold delays for press.
         """
         def __make_cycle( min_delay, max_delay ):
             values = [ random.randint( min_delay, max_delay ) / 1000
@@ -57,11 +70,9 @@ class PxlIntercept:
             return cycle( values )
 
         mnp, mxp = self.pi_cfg[ 'min_press_delay' ], self.pi_cfg[ 'max_press_delay' ]
-        mnr, mxr = self.pi_cfg[ 'min_reaction_time' ], self.pi_cfg[ 'max_reaction_time' ]
 
         self.delays = {
             'press': __make_cycle( mnp, mxp ),
-            'react': __make_cycle( mnr, mxr ),
         }
 
     def _next_delay( self, delay_type ):
@@ -77,24 +88,9 @@ class PxlIntercept:
         pyint.key_down( key, delay = hold_delay_s )
         pyint.key_up( key )
 
-    def _press_and_hold( self, key, pre_delay_s, hold_s ):
-        if pre_delay_s is not None and pre_delay_s > 0:
-            time.sleep( pre_delay_s )
-
-        pyint.key_down( key, delay = hold_s )
-        pyint.key_up( key )
-
     def press( self, key, pre_delay_s = None ):
         hold = self._next_delay( 'press' )
         self.tpexec.submit( self._press, key, pre_delay_s, hold )
-
-    def react( self, key ):
-        pre  = self._next_delay( 'react' )
-        hold = self._next_delay( 'press' )
-        self.tpexec.submit( self._press, key, pre, hold )
-
-    def press_and_hold( self, key, hold_s, pre_delay_s = None ):
-        self.tpexec.submit( self._press_and_hold, key, pre_delay_s, hold_s )
 
     def close( self ):
         print( f'ℹ️ {YELLOW}Closing PxlIntercept...{RESET}' )

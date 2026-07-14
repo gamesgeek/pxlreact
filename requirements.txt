@@ -4,9 +4,10 @@
 # Note: pyinterception is a local clone in ./pyinterception (imported as
 # pyinterception.src.interception) and is NOT installed via pip. It also requires
 # the Interception hardware driver to be installed on the system.
-#
-# The `keyboard` package mentioned in the README is no longer imported by
-# first-party code and is intentionally omitted.
 
-pywin32==311
+# Screen capture: backs the shared frame cache all pixel reads go through (and capture debug mode)
 mss==10.2.0
+# GUI layer: runtime status bar (pxl_statusbar) and profile editor (pxl_editor)
+dearpygui==2.3.1
+# Used only by the vendored pyinterception clone (win32api in its _utils); no first-party imports
+pywin32==311

@@ -21,29 +21,12 @@ from pyinterception.src.interception.strokes import KeyStroke, MouseStroke
 from pyinterception.src.interception._keycodes import get_key_information
 
 from pxl_config import get_settings
+from pxl_intercept import detect_device_index
 from pxl_lib import ColorCondition, PixelMonitor, CastLock
 from ansi import *
 
 # Substitute values for Action.key that send a mouse click at the current cursor position
 MOUSE_BUTTONS = frozenset( ( 'left', 'right', 'middle' ) )
-
-
-def _detect_device_index( my_hwid ):
-    """
-    Find the interception device index whose HWID contains `my_hwid`. Returns the index, or None if
-    no match is found (callers should fall back to the context default).
-    """
-    probe = pyint.Interception()
-    try:
-        idx = 0
-        for device in probe.devices:
-            hwid = device.get_HWID()
-            if hwid is not None and my_hwid in hwid:
-                return idx
-            idx += 1
-    finally:
-        probe.destroy()
-    return None
 
 
 @dataclass
@@ -81,21 +64,11 @@ class Action:
     def fire( self ):
         self.last = time.perf_counter()
 
-    def describe( self ):
-        """Short status string for terminal logging, combining cooldown and color state."""
+    def cooldown_remaining( self ):
+        """Seconds until the cooldown gate reopens (0.0 when ready or never fired)."""
         if self.cooldown > 0 and self.last >= 0:
-            remaining = max( 0.0, self.cooldown - ( time.perf_counter() - self.last ) )
-        else:
-            remaining = 0.0
-        cd = f"{GREEN}rdy{RESET}" if remaining == 0.0 else f"{YELLOW}{remaining:.2f}s{RESET}"
-
-        # One glyph per condition keeps multi-check actions compact in the terminal
-        if not self.color_checks:
-            color_part = " "
-        else:
-            color_part = "".join( cond.describe() for cond in self.color_checks )
-
-        return f"{CYAN}{self.name}{RESET} ({MAGENTA}{self.key}{RESET})[{cd}{color_part}]"
+            return max( 0.0, self.cooldown - ( time.perf_counter() - self.last ) )
+        return 0.0
 
 
 class Rotation:
@@ -163,13 +136,14 @@ def build_actions( actions_cfg ):
 
 def build_rotations( rotations_cfg, actions ):
     """
-    Build a name -> Rotation map. Rotations reference shared Action instances (from `actions`) so
-    cooldown state is shared across every rotation that uses a given action.
+    Build a name -> Rotation map from ROTATIONS config { name: { key, actions } }. Rotations
+    reference shared Action instances (from `actions`) so cooldown state is shared across every
+    rotation that uses a given action.
     """
     rotations = {}
-    for rname, seq in rotations_cfg.items():
+    for rname, cfg in rotations_cfg.items():
         resolved = []
-        for aname in seq:
+        for aname in cfg[ 'actions' ]:
             if aname not in actions:
                 raise ValueError( f"Rotation '{rname}' references unknown action '{aname}'" )
             resolved.append( actions[ aname ] )
@@ -192,24 +166,34 @@ class PxlRemapper:
     against receive().
 
     This class also owns the application's command hotkeys (formerly the keyboard-library KEYBINDS):
-    F12 / ESC quit, and Ctrl+P reports the mouse color. These are intercepted (not forwarded) and
-    are not gated by wincheck.
+    F12 / ESC quit, Ctrl+P reports the mouse color, and Ctrl+<reload_key> (default R) reloads
+    profile.json. These are intercepted (not forwarded) and are not gated by wincheck.
     """
 
-    def __init__( self, wincheck, actions, rotations, remaps, on_quit = None, cast_lock = None ):
+    def __init__( self, wincheck, actions, rotations, on_quit = None, cast_lock = None,
+                  hub = None, on_reload = None ):
         """
         Args:
             wincheck (PxlWinCheck): gating; remaps apply only while wincheck.check() returns True.
             actions (dict): ACTIONS config { action_name: { key, cooldown, cast_time, color_check } }
-            rotations (dict): ROTATIONS config { rotation_name: [ action_name, ... ] }
-            remaps (dict): REMAPS config { source_key_name: rotation_name }
+            rotations (dict): ROTATIONS config { rotation_name: { key, actions: [ action_name ] } };
+                each rotation's `key` is the physical source key it captures.
             on_quit (callable | None): invoked when the F12/ESC quit hotkey is pressed.
             cast_lock (CastLock | None): shared cast gate; while active, remap presses are dropped so
                 they cannot interrupt a cast. Reactions arm the same lock, so a cast-time reaction is
                 protected from remapped keypresses. A private lock is created if none is supplied.
+            hub (StatusHub | None): reporting funnel for runtime state (status bar). A private hub
+                is created if none is supplied.
+            on_reload (callable | None): invoked when the Ctrl+<reload_key> hotkey is pressed.
         """
         self.wincheck = wincheck
         self.on_quit = on_quit
+        self.on_reload = on_reload
+
+        if hub is None:
+            from pxl_status import StatusHub
+            hub = StatusHub()
+        self.hub = hub
 
         settings = get_settings()
 
@@ -227,7 +211,7 @@ class PxlRemapper:
         self.ctx = pyint.Interception()
         self.ctx.set_filter( self.ctx.is_keyboard, FilterKeyFlag.FILTER_KEY_ALL )
 
-        idx = _detect_device_index( settings[ 'devices' ][ 'keyboard_hwid' ] )
+        idx = detect_device_index( settings[ 'devices' ][ 'keyboard_hwid' ] )
         if idx is not None:
             self.ctx.keyboard = idx
             print( f"ℹ️ {GREEN}PxlRemapper{RESET}: capturing keyboard device {MAGENTA}{idx}{RESET}" )
@@ -235,7 +219,7 @@ class PxlRemapper:
             print( f"⚠️ {YELLOW}PxlRemapper: keyboard HWID not matched; using default device "
                    f"{MAGENTA}{self.ctx.keyboard}{RESET}" )
 
-        midx = _detect_device_index( settings[ 'devices' ][ 'mouse_hwid' ] )
+        midx = detect_device_index( settings[ 'devices' ][ 'mouse_hwid' ] )
         if midx is not None:
             self.ctx.mouse = midx
             print( f"ℹ️ {GREEN}PxlRemapper{RESET}: mouse device {MAGENTA}{midx}{RESET}" )
@@ -247,33 +231,45 @@ class PxlRemapper:
         self._sc_esc = get_key_information( 'esc' ).scan_code
         self._sc_f12 = get_key_information( 'f12' ).scan_code
         self._sc_p = get_key_information( 'p' ).scan_code
+        self._sc_reload = get_key_information( settings[ 'gui' ][ 'reload_key' ] ).scan_code
         self._sc_ctrl = get_key_information( 'ctrlleft' ).scan_code
         self._ctrl_down = False
         self._p_swallowed = False
+        self._reload_swallowed = False
 
         # Ctrl+P toggles this single-pixel screen-discovery monitor
         self._pixel_monitor = PixelMonitor()
 
-        # Build the shared action pool and rotations, then bind source keys to rotations
-        action_pool = build_actions( actions )
-        rotation_pool = build_rotations( rotations, action_pool )
-
-        # Build source-scancode -> remap lookup, plus per-source down-state for once-per-press
-        self.remaps = {}        # scan_code -> ( extended_bool, Rotation, source_name )
-        self.down = {}          # scan_code -> bool
-        for source_name, rotation_name in remaps.items():
-            if rotation_name not in rotation_pool:
-                raise ValueError( f"Remap '{source_name}' references unknown rotation '{rotation_name}'" )
-
-            info = get_key_information( source_name )
-            self.remaps[ info.scan_code ] = ( info.is_extended, rotation_pool[ rotation_name ], source_name )
-            self.down[ info.scan_code ] = False
-            print( f"ℹ️ {GREEN}PxlRemapper{RESET}: bound {CYAN}{source_name}{RESET} "
-                   f"(scan {MAGENTA}0x{info.scan_code:02x}{RESET}) -> rotation {MAGENTA}{rotation_name}{RESET}" )
+        self.rebind( actions, rotations )
 
         self._stop_event = threading.Event()
         self._thread = None
         self.start()
+
+    def rebind( self, actions, rotations ):
+        """
+        (Re)build the action pool, rotations, and source-key bindings from config. Called at
+        construction and again on profile reload; the loop thread reads `self.remaps` on each
+        stroke, so swapping in fresh dicts takes effect immediately (cooldown state resets).
+        """
+        action_pool = build_actions( actions )
+        rotation_pool = build_rotations( rotations, action_pool )
+
+        # source-scancode -> remap lookup, plus per-source down-state for once-per-press
+        new_remaps = {}     # scan_code -> ( extended_bool, Rotation )
+        new_down = {}       # scan_code -> bool
+        rotation_view = []  # ordered ( rotation_name, Rotation ) for the status bar
+        for rotation_name, cfg in rotations.items():
+            info = get_key_information( cfg[ 'key' ] )
+            new_remaps[ info.scan_code ] = ( info.is_extended, rotation_pool[ rotation_name ] )
+            new_down[ info.scan_code ] = False
+            rotation_view.append( ( rotation_name, rotation_pool[ rotation_name ] ) )
+            print( f"ℹ️ {GREEN}PxlRemapper{RESET}: bound {CYAN}{cfg[ 'key' ]}{RESET} "
+                   f"(scan {MAGENTA}0x{info.scan_code:02x}{RESET}) -> rotation {MAGENTA}{rotation_name}{RESET}" )
+
+        self.remaps = new_remaps
+        self.down = new_down
+        self.hub.set_rotation_view( rotation_view )
 
     def start( self ):
         if self._thread and self._thread.is_alive():
@@ -294,20 +290,17 @@ class PxlRemapper:
             pass
 
     def _match( self, stroke ):
-        """
-        Return ( scan_code, extended, remap, source_name ) if the stroke matches a remapped source,
-        else None.
-        """
+        """Return ( scan_code, rotation ) if the stroke matches a remapped source, else None."""
         entry = self.remaps.get( stroke.code )
         if entry is None:
             return None
 
-        extended, remap, source_name = entry
+        extended, rotation = entry
         stroke_extended = bool( stroke.flags & KeyFlag.KEY_E0 )
         if stroke_extended != extended:
             return None
 
-        return stroke.code, extended, remap, source_name
+        return stroke.code, rotation
 
     def _run( self ):
         try:
@@ -335,7 +328,7 @@ class PxlRemapper:
                     self.ctx.send( device, stroke )
                     continue
 
-                scan_code, _extended, rotation, source_name = match
+                scan_code, rotation = match
                 is_up = bool( stroke.flags & KeyFlag.KEY_UP )
 
                 if is_up:
@@ -350,20 +343,20 @@ class PxlRemapper:
                 self.down[ scan_code ] = True
 
                 if not self.wincheck.check():
-                    # Outside the target app: behave like the real key
+                    # Outside the target app: behave like the real key (silently)
                     self.ctx.send( device, stroke )
-                    print( f"{CYAN}{source_name}{RESET} {YELLOW}inactive{RESET} -> passthrough" )
                     continue
 
                 if self.cast_lock.active():
-                    # A cast is in progress; drop this press so the cast is not interrupted.
-                    # FUTURE: to queue instead of dropping, buffer ( source_name, rotation ) here
-                    # and flush at cast-end by shrinking the await_input timeout to wake the loop
-                    # when the cast elapses, then resolve/fire each buffered press in order.
-                    print( f"{CYAN}{source_name}{RESET} {YELLOW}casting{RESET} -> dropped" )
+                    # A cast is in progress; drop this press so the cast is not interrupted and
+                    # flash the status bar frame.
+                    # FUTURE: to queue instead of dropping, buffer the rotation here and flush at
+                    # cast-end by shrinking the await_input timeout to wake the loop when the cast
+                    # elapses, then resolve/fire each buffered press in order.
+                    self.hub.record_drop()
                     continue
 
-                self._fire( source_name, rotation )
+                self._fire( rotation )
         except Exception as exc:
             print( f"{RED}PxlRemapper loop error: {exc}{RESET}" )
         finally:
@@ -405,6 +398,16 @@ class PxlRemapper:
                 self._p_swallowed = False
             return True
 
+        # Ctrl+<reload_key> -> reload profile.json (applied by the main loop between ticks)
+        if code == self._sc_reload and ( self._ctrl_down or self._reload_swallowed ):
+            if not is_up:
+                self._reload_swallowed = True
+                if self.on_reload is not None:
+                    self.on_reload()
+            else:
+                self._reload_swallowed = False
+            return True
+
         return False
 
     def _press_substitute( self, key ):
@@ -439,17 +442,15 @@ class PxlRemapper:
         time.sleep( hold )
         self.ctx.send( self.ctx.keyboard, up )
 
-    def _fire( self, source_name, rotation ):
+    def _fire( self, rotation ):
         """
-        Resolve the rotation and send the chosen action's key (if any), with terminal diagnostics.
-        An action with a cast_time arms the global cast lock so subsequent presses are dropped until
-        the cast completes.
+        Resolve the rotation and send the chosen action's key (if any). An action with a cast_time
+        arms the global cast lock so subsequent presses are dropped until the cast completes. The
+        fired ability is published to the hub; a press with nothing ready is silent (the status
+        bar's live rotation rows already show why).
         """
-        states = " ".join( a.describe() for a in rotation.actions )
         action = rotation.resolve()
-
         if action is None:
-            print( f"{BLUE}🖮 got {RED}{source_name}{RESET} | {states} | {BLUE}🖮 sent {YELLOW}none{RESET}" )
             return
 
         self._press_substitute( action.key )
@@ -458,4 +459,4 @@ class PxlRemapper:
         if action.cast_time > 0:
             self.cast_lock.arm( action.cast_time )
 
-        print( f"{BLUE}🖮 got {RED}{source_name}{RESET} | {states} | {BLUE}🖮 sent {RED}{action.key}{RESET}" )
+        self.hub.record_ability( action.name )

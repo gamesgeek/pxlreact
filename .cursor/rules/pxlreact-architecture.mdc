@@ -1,0 +1,14 @@
+---
+description: pxlreact architecture conventions (post-pxlreact2 transition)
+alwaysApply: true
+---
+
+- All gameplay configuration lives in external files: `settings.toml` (manual, low-churn settings)
+  and `profile.json` (GUI-managed gameplay config); never reintroduce inline configuration in
+  Python modules. `pxl_config.py` loads, normalizes, and validates both.
+- All screen pixel reads go through `pxl_lib.get_pixel_color` / the shared `PIXELS` PixelSource
+  (mss-backed frame cache); do not add direct GDI or per-call screen grabs.
+- Gameplay events are published to `pxl_status.StatusHub` and rendered by the status bar; do not
+  print gameplay output (reaction/rotation activity) to the terminal.
+- The pxlreact2 transition is complete; its record is `PXLREACT2_STATUS.md` and retired pxlreact1
+  files live in `pxlreact1_archive/` (moved there, not deleted).

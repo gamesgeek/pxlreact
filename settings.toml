@@ -1,9 +1,12 @@
 # pxlreact settings - low-churn configuration, edited manually.
-# Gameplay configuration (reactions, actions, rotations, remaps, wincheck) lives in profile.json.
+# Gameplay configuration (reactions, actions, rotations, wincheck) lives in profile.json.
 
 [app]
 # Seconds between pixel polls on the main loop; longer intervals may miss rapid changes
 tick_interval = 0.025
+# Seconds a grabbed screen frame keeps serving pixel reads; one grab per tick covers every
+# configured pixel, so keep this below tick_interval
+frame_max_age = 0.010
 
 [color]
 # Default SSD (sum of squared differences) tolerance for any color check that does not set its
@@ -16,12 +19,10 @@ keyboard_hwid = 'HID\VID_342D&PID_E3C8&REV_0009&MI_00'
 mouse_hwid = 'HID\VID_046D&PID_C08B&REV_2703&MI_00'
 
 [intercept]
-# Injection thread pool size and humanized delays (milliseconds)
+# Injection thread pool size and humanized key-hold delays (milliseconds)
 max_workers = 5
 min_press_delay = 50
 max_press_delay = 75
-min_reaction_time = 115
-max_reaction_time = 288
 precompute_size = 10000
 
 [remapper]
@@ -30,6 +31,18 @@ await_timeout_ms = 500
 # Humanized hold (seconds) for injected substitute keys and mouse buttons
 min_hold = 0.050
 max_hold = 0.075
+
+[gui]
+# In-process runtime status bar (DearPyGui window, always on top); replaces the terminal crawl
+statusbar_enabled = true
+# Status bar refresh rate; rotation color checks refresh at color_check_hz to limit pixel reads
+fps = 15
+color_check_hz = 3
+# Viewport position and size (pixels); position is desktop-absolute so it can sit on a side monitor
+pos = [ 20, 20 ]
+size = [ 460, 480 ]
+# Hotkey (with Ctrl) that reloads profile.json in the running app
+reload_key = "r"
 
 [trigger_log]
 # Record the pixel color responsible for each reaction firing; report at exit

@@ -2,15 +2,13 @@
 pxl_capture.py - debug-only screen-region capture for diagnosing reaction misfires.
 
 ISOLATION / HOW TO UNPLUG:
-This module is entirely optional and self-contained. It is imported only when
-`PxlReactionRegistry.capture_enabled` is True; with capture off, none of this code is touched and
-the core uses the plain, capture-free `PxlReaction` via the default `build_reaction` factory - there
-is no per-trigger flag checking anywhere in the core path.
+This module is entirely optional and self-contained. It is imported only when `capture.enabled` is
+true in settings.toml; with capture off, none of this code is touched and the core uses the plain,
+capture-free `PxlReaction` via the default `build_reaction` factory - there is no per-trigger flag
+checking anywhere in the core path.
 
-To remove the feature permanently: delete this file and the small capture block in
-`PxlReactionRegistry.__init__` (and the `capture_*` config attributes). No other changes are needed.
-
-Requires: pip install mss
+To remove the feature permanently: delete this file, the capture block in
+`PxlReactionRegistry.__init__`, and the [capture] section of settings.toml. No other changes needed.
 """
 import glob
 import os
@@ -41,7 +39,7 @@ class SnapshotCapture:
         self.out_dir = out_dir
 
         # mss instances are single-thread; only the poll thread (which constructs this) calls grab()
-        self._sct = mss.mss()
+        self._sct = mss.MSS()
         self._q = queue.Queue()
         self._stop = threading.Event()
         self._workers = [ threading.Thread( target = self._run, name = 'SnapshotSave', daemon = True )

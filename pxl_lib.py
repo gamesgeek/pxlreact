@@ -8,81 +8,123 @@ import ctypes
 import threading
 import time
 from ctypes import wintypes
+
+from mss import MSS
+
 from ansi import *
 
-HDC = ctypes.windll.user32.GetDC( 0 )
 WPT = wintypes.POINT()
 
-# Several threads (winwatch, the main poll loop, the remapper) read pixels through the single
-# shared screen DC. GDI is not safe for concurrent calls on one DC, so serialize access.
-_HDC_LOCK = threading.Lock()
-    
 
-def _refresh_hdc():
+class PixelSource:
     """
-    Release and re-acquire the cached screen DC. Used to recover from an invalid read, which can
-    happen if the DC has gone stale (display/mode change, DWM event). Call while holding _HDC_LOCK.
-    """
-    global HDC
-    try:
-        ctypes.windll.user32.ReleaseDC( 0, HDC )
-    except Exception:
-        pass
-    HDC = ctypes.windll.user32.GetDC( 0 )
+    Shared screen-pixel reader backed by mss frame grabs.
 
-def get_active_window_rect():
+    A GDI GetPixel round-trip costs ~2.8 ms on this machine, and an mss BitBlt grab costs the same
+    ~2.8 ms REGARDLESS of region size - so one grab of the bounding region of every configured
+    pixel serves the whole tick (poll loop, readiness checks, remapper fire checks, status bar) for
+    the price of a single legacy read. Indexing pixels out of the grabbed BGRA buffer is
+    sub-microsecond (never use mss's ScreenShot.pixel(); it builds a full nested pixel list).
+
+    Thread safety: MSS instances are not shareable across threads, so each calling thread gets its
+    own via thread-local storage; the cached frame (an immutable tuple) is swapped under a lock and
+    read without one. Callers outside the registered region fall back to an uncached 1x1 grab, so
+    discovery tools (pixel picker, Ctrl+P monitor) work with no registration.
+
+    `max_age` sets how long a cached frame keeps serving reads: within one poll tick every consumer
+    hits the cache, while the next tick (a full tick_interval later) grabs fresh.
     """
-    Get the rectangle coordinates of the active window.
-    
-    Returns:
-        tuple[int, int, int, int]: (left, top, right, bottom) coordinates of the active window,
-                                  or None if no active window found.
-    """
-    try:
-        # Get the handle to the active window
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
-        if hwnd == 0:
+
+    def __init__( self, max_age = 0.010 ):
+        self.max_age = max_age
+        self._lock = threading.Lock()
+        self._tls = threading.local()
+        self._region = None     # mss monitor dict covering all registered points
+        self._frame = None      # ( raw_bgra, width, left, top, grabbed_at )
+
+    def _sct( self ):
+        sct = getattr( self._tls, 'sct', None )
+        if sct is None:
+            sct = MSS()
+            self._tls.sct = sct
+        return sct
+
+    def register_points( self, points, pad = 2 ):
+        """
+        (Re)declare every coordinate the app is configured to read; the cache region becomes their
+        padded bounding box. Called at startup and after a profile reload. An empty list disables
+        the cache (all reads fall back to 1x1 grabs).
+        """
+        with self._lock:
+            if not points:
+                self._region = None
+            else:
+                xs = [ p[ 0 ] for p in points ]
+                ys = [ p[ 1 ] for p in points ]
+                self._region = { 'left': min( xs ) - pad, 'top': min( ys ) - pad,
+                                 'width': max( xs ) - min( xs ) + 1 + 2 * pad,
+                                 'height': max( ys ) - min( ys ) + 1 + 2 * pad }
+            self._frame = None
+
+    def get( self, x, y ):
+        """RGB at screen (x, y), or None on a failed grab."""
+        region = self._region
+        if ( region is not None
+             and region[ 'left' ] <= x < region[ 'left' ] + region[ 'width' ]
+             and region[ 'top' ] <= y < region[ 'top' ] + region[ 'height' ] ):
+            return self._get_cached( x, y )
+        return self._get_single( x, y )
+
+    def _get_cached( self, x, y ):
+        frame = self._frame
+        if frame is None or ( time.perf_counter() - frame[ 4 ] ) > self.max_age:
+            with self._lock:
+                # Re-check under the lock; another thread may have refreshed while we waited
+                frame = self._frame
+                if frame is None or ( time.perf_counter() - frame[ 4 ] ) > self.max_age:
+                    try:
+                        shot = self._sct().grab( self._region )
+                    except Exception:
+                        print( f'{MAGENTA}\tbad grab for ({YELLOW}{x}{RESET}, {YELLOW}{y}{RESET})' )
+                        return None
+                    frame = ( shot.raw, shot.width, self._region[ 'left' ],
+                              self._region[ 'top' ], time.perf_counter() )
+                    self._frame = frame
+
+        raw, width, left, top, _ = frame
+        off = ( ( y - top ) * width + ( x - left ) ) * 4
+        return raw[ off + 2 ], raw[ off + 1 ], raw[ off ]     # BGRA -> RGB
+
+    def _get_single( self, x, y ):
+        try:
+            raw = self._sct().grab( { 'left': x, 'top': y, 'width': 1, 'height': 1 } ).raw
+        except Exception:
+            print( f'{MAGENTA}\tbad read at {YELLOW}{x}{RESET}, {YELLOW}{y}{RESET}' )
             return None
-            
-        # Get window rectangle
-        rect = wintypes.RECT()
-        success = ctypes.windll.user32.GetWindowRect( hwnd, ctypes.byref( rect ) )
-        if success == 0:
-            return None
-            
-        return rect.left, rect.top, rect.right, rect.bottom
-    except Exception:
-        return None
+        return raw[ 2 ], raw[ 1 ], raw[ 0 ]
+
+
+# Module-level singleton: every consumer reads through this, so the app can register its
+# configured points once and all callers share the per-tick frame.
+PIXELS = PixelSource()
+
 
 def get_pixel_color( x, y ):
     """
-    Retrieve the rgb values of the pixel at coordinates (x, y).
-
-    Reads are serialized on _HDC_LOCK to avoid concurrent GDI access to the shared screen DC, which
-    returns CLR_INVALID (-1) under contention. A single failed read is retried once after refreshing
-    the DC; only a second failure is treated as a genuine bad read.
+    Retrieve the rgb values of the pixel at coordinates (x, y), served from the shared PixelSource
+    frame cache (see PixelSource for the caching and thread-safety story).
     """
-    with _HDC_LOCK:
-        pixel = ctypes.windll.gdi32.GetPixel( HDC, x, y )
-
-        if pixel == -1:
-            _refresh_hdc()
-            pixel = ctypes.windll.gdi32.GetPixel( HDC, x, y )
-
-            if pixel == -1:
-                print( f'{MAGENTA}\tbad read at {YELLOW}{x}{RE}, {YELLOW}{y}{RE}' )
-                return None
-
-    red = pixel & 0xFF
-    green = ( pixel >> 8 ) & 0xFF
-    blue = ( pixel >> 16 ) & 0xFF
-    return red, green, blue
+    return PIXELS.get( x, y )
 
 def get_color_difference( c1, c2 ):
     """
-    Calculate the sum of squared differences between two colors.
+    Calculate the sum of squared differences between two colors. Unrolled: this runs for every
+    color comparison on the poll path and is ~4x faster than a generator over zip().
     """
-    return sum( ( a - b ) ** 2 for a, b in zip( c1, c2 ) )
+    dr = c1[ 0 ] - c2[ 0 ]
+    dg = c1[ 1 ] - c2[ 1 ]
+    db = c1[ 2 ] - c2[ 2 ]
+    return dr * dr + dg * dg + db * db
 
 def colors_different( c1, c2, tolerance ):
     """
@@ -163,28 +205,7 @@ class ColorCondition:
             return colors_similar( observed, self.color, self.tolerance )
         return colors_different( observed, self.color, self.tolerance )
 
-    def describe( self ):
-        """Short '+'/'-' status glyph for terminal logging (matched expectation -> green '+')."""
-        ok = self.passes()
-        glyph = '+' if self.match else '!'
-        return f"{GREEN}{glyph}{RESET}" if ok else f"{RED}{glyph}{RESET}"
 
-def get_mouse_pos_window():
-    """
-    Get the current position of the mouse cursor in window-relative space.
-    """
-    hwnd = ctypes.windll.user32.GetForegroundWindow()
-    if hwnd == 0:
-        return None
-    rect = wintypes.RECT()
-    success = ctypes.windll.user32.GetWindowRect( hwnd, ctypes.byref( rect ) )
-    if success == 0:
-        return None
-
-    ctypes.windll.user32.GetCursorPos( ctypes.byref( WPT ) )
-
-    return WPT.x - rect.left, WPT.y - rect.top
-    
 def get_mouse_pos():
     """
     Get the current position of the mouse cursor.
@@ -235,34 +256,6 @@ def describe_color( rgb ):
              f"({MAGENTA}{r:>3}{RESET}, {MAGENTA}{g:>3}{RESET}, {MAGENTA}{b:>3}{RESET}) "
              f"{CYAN}{rgb_to_hex( rgb )}{RESET}" )
 
-def find_most_similar_pixel( color, mnx, mny, mxx, mxy ):
-    """
-    Within the rectangle bounded by mnx, mny, mxx, mxy, find the color that is closest to the
-    given color.
-    """
-
-    # The most similar color and its x,y coordinates
-    msc = None
-    msx = None
-    msy = None
-
-    smallest_difference = float('inf')
-
-    # Search inclusively
-    for x in range( min( mnx, mxx ), max( mnx, mxx ) + 1 ):
-        for y in range( min( mny, mxy ), max( mny, mxy ) + 1 ):
-
-            c = get_pixel_color( x, y )
-            difference = get_color_difference( color, c )
-
-            if difference < smallest_difference:
-                smallest_difference = difference
-                msc = c
-                msx = x
-                msy = y
-
-    return msc, msx, msy, smallest_difference
-
 def report_color_at( x, y, color = None ):
     """
     Print the RGB color value at the specified coordinates.
@@ -287,19 +280,6 @@ def report_color_at( x, y, color = None ):
     print( f"({MAGENTA}{x}{RESET}, {MAGENTA}{y}{RESET}) - "
            f"({MAGENTA}{r}{RESET}, {MAGENTA}{g}{RESET}, {MAGENTA}{b}{RESET}) - "
            f"{MAGENTA}{hex_int}{RESET} - {MAGENTA}{hex_hash}{RESET}" )
-
-def report_mouse_color( delay = 1 ):
-    """
-    Get the current mouse position, wait for the specified delay, then report the color at that position.
-    
-    Args:
-        delay (float): The delay in seconds before reading the color (default: 1 second).
-                      This allows the user to move the cursor away to avoid hover state interference.
-    """
-    x, y = get_mouse_pos()
-    time.sleep( delay )
-    report_color_at( x, y )
-
 
 class PixelMonitor:
     """

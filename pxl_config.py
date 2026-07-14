@@ -2,8 +2,8 @@
 pxl_config.py loads, normalizes, and validates the two external configuration files:
 
 - settings.toml: low-churn application settings edited manually (devices, timing, defaults)
-- profile.json: gameplay configuration (reactions, actions, rotations, remaps, wincheck),
-  intended to be managed by the GUI in a later phase
+- profile.json: gameplay configuration (reactions, actions, rotations, wincheck), managed by
+  the pxl_editor GUI or edited manually
 
 Normalization happens entirely at load time so runtime code never consults global defaults:
 colors become tuples and every color check carries an explicit `tolerance` (falling back to
@@ -50,13 +50,18 @@ def _load_settings( path ):
     except tomllib.TOMLDecodeError as exc:
         _fail( f"invalid TOML in {path} ({exc})" )
 
-    for section in ( "app", "color", "devices", "intercept", "remapper", "trigger_log", "capture" ):
+    for section in ( "app", "color", "devices", "intercept", "remapper", "gui", "trigger_log",
+                     "capture" ):
         if section not in raw:
             _fail( f"{path}: missing [{section}] section" )
 
     tick = raw[ "app" ].get( "tick_interval", 0.025 )
     if not ( 0 < tick < 1 ):
         _fail( f"{path}: unreasonable app.tick_interval: {tick}" )
+
+    raw[ "app" ].setdefault( "frame_max_age", 0.010 )
+    if not ( 0 < raw[ "app" ][ "frame_max_age" ] <= tick ):
+        _fail( f"{path}: app.frame_max_age must be positive and no larger than tick_interval" )
 
     tolerance = raw[ "color" ].get( "default_tolerance" )
     if not ( isinstance( tolerance, int ) and tolerance >= 0 ):
@@ -71,13 +76,23 @@ def _load_settings( path ):
     tlog[ "path" ] = tlog.get( "path" ) or None
     tlog.setdefault( "collapse_tolerance", tolerance )
 
+    gui = raw[ "gui" ]
+    gui.setdefault( "statusbar_enabled", True )
+    gui.setdefault( "fps", 15 )
+    gui.setdefault( "color_check_hz", 3 )
+    gui.setdefault( "pos", [ 20, 20 ] )
+    gui.setdefault( "size", [ 460, 480 ] )
+    gui.setdefault( "reload_key", "r" )
+    if not ( 0 < gui[ "fps" ] <= 60 ) or not ( 0 < gui[ "color_check_hz" ] <= gui[ "fps" ] ):
+        _fail( f"{path}: gui.fps / gui.color_check_hz out of range" )
+
     return raw
 
 
 def load_profile( path = PROFILE_PATH, default_tolerance = None ):
     """
     Load, normalize, and validate profile.json. Returns a dict with keys `wincheck`, `reactions`,
-    `actions`, `rotations`, `remaps`. Colors are tuples and every color check carries an explicit
+    `actions`, `rotations`. Colors are tuples and every color check carries an explicit
     `tolerance` after this call.
     """
     if default_tolerance is None:
@@ -91,7 +106,7 @@ def load_profile( path = PROFILE_PATH, default_tolerance = None ):
     except ValueError as exc:
         _fail( f"invalid JSON in {path} ({exc})" )
 
-    for section in ( "wincheck", "reactions", "actions", "rotations", "remaps" ):
+    for section in ( "wincheck", "reactions", "actions", "rotations" ):
         if section not in raw:
             _fail( f"{path}: missing '{section}' section" )
 
@@ -101,22 +116,41 @@ def load_profile( path = PROFILE_PATH, default_tolerance = None ):
                        for name, data in raw[ "reactions" ].items() },
         "actions": { name: _normalize_action( name, data, default_tolerance )
                      for name, data in raw[ "actions" ].items() },
-        "rotations": raw[ "rotations" ],
-        "remaps": raw[ "remaps" ],
+        "rotations": { name: _normalize_rotation( name, data )
+                       for name, data in raw[ "rotations" ].items() },
     }
 
-    # Referential integrity: rotations name real actions, remaps name real rotations
-    for rname, seq in profile[ "rotations" ].items():
-        if not isinstance( seq, list ) or not seq:
-            _fail( f"rotation '{rname}' must be a non-empty list of action names" )
-        for aname in seq:
+    # Referential integrity: rotations name real actions; source keys are unique across rotations
+    keys_seen = {}
+    for rname, cfg in profile[ "rotations" ].items():
+        if cfg[ "key" ] in keys_seen:
+            _fail( f"rotations '{keys_seen[ cfg[ 'key' ] ]}' and '{rname}' share key '{cfg[ 'key' ]}'" )
+        keys_seen[ cfg[ "key" ] ] = rname
+        for aname in cfg[ "actions" ]:
             if aname not in profile[ "actions" ]:
                 _fail( f"rotation '{rname}' references unknown action '{aname}'" )
-    for source, rname in profile[ "remaps" ].items():
-        if rname not in profile[ "rotations" ]:
-            _fail( f"remap '{source}' references unknown rotation '{rname}'" )
 
     return profile
+
+
+def profile_points( profile ):
+    """
+    Every screen coordinate a normalized profile can read at runtime: wincheck markers, enabled
+    reactions (monitored pixel + color-readiness pixels), and action color checks. Used to size
+    the shared PixelSource frame-cache region.
+    """
+    points = [ ( m[ 'x' ], m[ 'y' ] ) for m in profile[ 'wincheck' ][ 'markers' ] ]
+    for data in profile[ 'reactions' ].values():
+        if not data[ 'enabled' ]:
+            continue
+        points.append( ( data[ 'x' ], data[ 'y' ] ) )
+        for spec in ( data[ 'ready' ] or [] ):
+            if spec[ 'type' ] == 'color':
+                points.append( ( spec[ 'px' ], spec[ 'py' ] ) )
+    for action in profile[ 'actions' ].values():
+        for cc in action[ 'color_check' ]:
+            points.append( ( cc[ 'px' ], cc[ 'py' ] ) )
+    return points
 
 
 def _color_tuple( value, owner ):
@@ -233,8 +267,24 @@ def _normalize_reaction( name, data, default_tolerance ):
         "cast_time": cast_time,
         "ignore_colors": [ _color_tuple( c, owner ) for c in ignore ],
         "press": press,
-        "glyph": data.get( "glyph", f"[{name}]" ),
     }
+
+
+def _normalize_rotation( name, data ):
+    """A rotation binds its own source key to an ordered action sequence (remaps tier retired)."""
+    owner = f"rotation '{name}'"
+    if not isinstance( data, dict ):
+        _fail( f"{owner} must be an object with 'key' and 'actions'" )
+
+    key = data.get( "key" )
+    if not ( isinstance( key, str ) and key ):
+        _fail( f"{owner} must define a non-empty source 'key'" )
+
+    actions = data.get( "actions" )
+    if not ( isinstance( actions, list ) and actions ):
+        _fail( f"{owner} must list at least one action" )
+
+    return { "key": key, "actions": list( actions ) }
 
 
 def _normalize_action( name, data, default_tolerance ):

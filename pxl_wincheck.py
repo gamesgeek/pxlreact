@@ -8,9 +8,21 @@ key press or pixel reaction), avoiding stale-flag false triggers during state tr
 loading screens.
 """
 
-import win32gui
+import ctypes
+
 from pxl_lib import ColorCondition
-from ansi import *
+
+_user32 = ctypes.windll.user32
+
+
+def _foreground_title():
+    """
+    Title of the foreground window via ctypes (the only thing pywin32 was used for). The buffer is
+    per-call because check() runs concurrently on the poll and remapper threads.
+    """
+    buf = ctypes.create_unicode_buffer( 256 )
+    _user32.GetWindowTextW( _user32.GetForegroundWindow(), buf, 256 )
+    return buf.value
 
 
 class PxlWinCheck:
@@ -22,6 +34,13 @@ class PxlWinCheck:
                 list of { x, y, color, tolerance }. Markers guard against inadvertent reactions, so
                 their tolerance defaults to 0 (exact match) at load time; all must pass (AND).
         """
+        self.update( config )
+
+    def update( self, config ):
+        """
+        Apply a (new) wincheck config in place, so shared references held by the remapper and poll
+        loop survive a profile reload.
+        """
         self.target_app = config[ 'target_window' ]
         self.markers = [
             ColorCondition( m[ 'x' ], m[ 'y' ], m[ 'color' ], m[ 'tolerance' ] )
@@ -32,7 +51,7 @@ class PxlWinCheck:
         return all( marker.passes() for marker in self.markers )
 
     def in_target_app( self ):
-        return self.target_app == win32gui.GetWindowText( win32gui.GetForegroundWindow() )
+        return self.target_app == _foreground_title()
 
     def check( self ):
         return self.in_target_app() and self.marker_ok()

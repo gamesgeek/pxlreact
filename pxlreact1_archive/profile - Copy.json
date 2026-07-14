@@ -29,7 +29,8 @@
       "confirm": 0.1,
       "cooldown": 5,
       "ignore_colors": [],
-      "press": "F"
+      "press": "F",
+      "glyph": "+\u2764\ufe0f+"
     },
     "MP1": {
       "enabled": true,
@@ -45,10 +46,11 @@
       "confirm": 0.1,
       "cooldown": 3,
       "press": "2",
+      "glyph": "*\u2728*",
       "ignore_colors": []
     },
     "CV1": {
-      "enabled": false,
+      "enabled": true,
       "x": 166,
       "y": 1235,
       "type": "react_if_not_color",
@@ -84,47 +86,8 @@
         ]
       ],
       "cast_time": 0.4,
-      "press": "T"
-    },
-    "conv": {
-      "enabled": true,
-      "x": 289,
-      "y": 1254,
-      "type": "react_if_not_color",
-      "color": [
-        103,
-        193,
-        239
-      ],
-      "tolerance": 4000,
-      "confirm": 0.1,
-      "cooldown": 0.3100000023841858,
-      "ignore_colors": [
-        [
-          186,
-          140,
-          207
-        ]
-      ],
       "press": "T",
-      "cast_time": 0.4000000059604645,
-      "ready": [
-        {
-          "type": "cooldown",
-          "cooldown": 6.0
-        },
-        {
-          "type": "color",
-          "px": 2149,
-          "py": 1363,
-          "color": [
-            108,
-            178,
-            197
-          ],
-          "tolerance": 4000
-        }
-      ]
+      "glyph": "~\ud83e\uddff~"
     }
   },
   "actions": {
@@ -284,23 +247,21 @@
     }
   },
   "rotations": {
-    "main": {
-      "key": "l",
-      "actions": [
-        "unholy might",
-        "ruzhan's trap",
-        "deception1",
-        "deception2",
-        "brutality"
-      ]
-    },
-    "boss": {
-      "key": "z",
-      "actions": [
-        "despair1",
-        "pain offering",
-        "despair2"
-      ]
-    }
+    "main": [
+      "unholy might",
+      "ruzhan's trap",
+      "deception1",
+      "deception2",
+      "brutality"
+    ],
+    "boss": [
+      "despair1",
+      "pain offering",
+      "despair2"
+    ]
+  },
+  "remaps": {
+    "l": "main",
+    "z": "boss"
   }
 }

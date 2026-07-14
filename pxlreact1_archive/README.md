@@ -8,3 +8,5 @@ proceeds.
   `settings.toml` under `[devices]` (Phase 1)
 - `pxl_remap_maps.py` - inline `ACTIONS` / `ROTATIONS` / `REMAPS` configuration, now in
   `profile.json` (Phase 1)
+- `PXLREACT_2.md` - the original pxlreact2 transition vision/requirements document; the transition
+  completed and its running record lives in `PXLREACT2_STATUS.md` (Phase 4)

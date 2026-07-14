@@ -1,8 +1,11 @@
 ---
-description: For now, focus on the "lite" GUI-less/headless implementation
+description: GUI layer conventions (DearPyGui) and headless requirement
 globs:
 alwaysApply: true
 ---
 
-- We're working on pxlreact_lite and focusing on the GUI-less implementation for now; unless explicitly
-instructed, ignore pxl_gui.py, pxl_guiconst.py, and any tkinter-related info
+- pxlreact's GUI layer uses DearPyGui: `pxl_statusbar.py` (in-process runtime status bar) and
+`pxl_editor.py` (separate-process profile.json editor); do not introduce tkinter or other GUI
+frameworks, and ignore any legacy notes referring to tkinter, pxl_gui.py, or pxl_guiconst.py
+- The core must remain fully functional headless: gui.statusbar_enabled = false in settings.toml
+disables the status bar, and no core module may import dearpygui at module level
